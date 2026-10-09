@@ -2,7 +2,7 @@
 
 **How efficiently do decision models navigate multi-step problems?**
 
-BeelineBench measures how well a decision model "plans ahead" when solving a multi-step problem.  A model that navigates more directly ("beelines") to a solution "plans ahead" spends less time exploring dead ends.  This benchmark measures how efficiently Jev and other choice models navigate to a solution, compared to a perfect search along the shortest path.
+BeelineBench measures how well a decision model "plans ahead" when solving a multi-step problem.  A model that navigates more directly to a solution ("beelines") receives a higher score.
 
 ## Benchmark (Higher is Better)
 

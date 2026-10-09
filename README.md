@@ -4,7 +4,7 @@
 
 **How efficiently do decision models navigate multi-step problems?**
 
-BeelineBench measures how well a decision model "plans ahead" when solving a multi-step problem.  A model that navigates more directly ("beelines") to a solution "plans ahead" spends less time exploring dead ends.  This benchmark measures how efficiently Jev and other choice models navigate to a solution, compared to a perfect search along the shortest path.
+BeelineBench measures how well a decision model "plans ahead" when solving a multi-step problem.  A model that navigates more directly to a solution ("beelines") receives a higher score.
 
 ## Benchmark (Higher is Better)
 
@@ -214,14 +214,14 @@ A full run of benchmark 1.0.0 has 100 trials for each of its 6 domains. The tabl
 
 | model | price for a million tokens | input tokens of a full run | estimated price of a full run | basis |
 |---|---|---|---|---|
-| Jev 1.13 | $0.042 input, output free | 203 million | $8.54 | measured on 415 trials; token counts of GPT-6 Luna (Decisions) |
+| Jev 1.13 | $0.042 input, output free | 203 million | $8.51 | measured on 500 trials; token counts of GPT-6 Luna (Decisions) |
 | GPT-6 Luna (Decisions) | $0.10 input, output free | 209 million | $20.93 | measured on 501 trials |
-| pplx-decider 1.1 | $0.02 input, output free | 193 million | $3.85 | measured on 336 trials; token counts of GPT-6 Luna (Decisions) |
-| pplx-decider 1.0 | $0.02 input, output free | 199 million | $3.98 | measured on 29 trials; token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
-| Liquid d1 | $0.04 input, output free | 296 million | $11.85 | measured on 11 trials; token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
-| Kev 4B | $0.042 input, output free | 661 million | $27.74 | measured on 1 trials; token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
-| Mercury Decide | $0.02 input, output free | 166 million | $3.32 | measured on 29 trials; token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
-| Clef | $0.24 input, output free | 193 million | $46.40 | token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
+| pplx-decider 1.1 | $0.02 input, output free | 186 million | $3.73 | measured on 350 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13 |
+| pplx-decider 1.0 | $0.02 input, output free | 193 million | $3.86 | measured on 35 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
+| Liquid d1 | $0.04 input, output free | 315 million | $12.62 | measured on 13 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
+| Kev 4B | $0.042 input, output free | 663 million | $27.83 | measured on 1 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
+| Mercury Decide | $0.02 input, output free | 165 million | $3.30 | measured on 35 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
+| Clef | $0.24 input, output free | 195 million | $46.92 | token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
 | Clef-flash | $0.09 input, output free | 1,085 million | $97.63 | measured on 25 trials; token counts of GPT-6 Luna (Decisions) |
 
 The estimate uses the mean input tokens and output tokens of a trial in `results/`. If a model has no results for a domain, the estimate uses the token counts of a different model. The basis column gives the source of the token counts.
