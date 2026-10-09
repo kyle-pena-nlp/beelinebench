@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass
@@ -80,6 +81,9 @@ class Record:
     random_score: float | None = None
     #: Tries of a request that failed with an intermittent error before the answer.
     retries: int = 0
+    #: The choices of each arm against the oracle: for ``model``, ``heuristic`` and
+    #: ``random``, a :meth:`Tally.result`. ``None`` before ``fill`` adds it.
+    choices: dict | None = None
 
 
 def troubles(record: Record) -> int:
@@ -110,8 +114,91 @@ def now() -> str:
 Observer = Callable[[str, int, int, int], None]
 
 
-def baseline(problem: Problem, rules: Benchmark, observe: Observer | None = None):
-    def step(expansions: int, frontier: int) -> None:
+class Tally:
+    """The choices of one arm against the oracle, step by step.
+
+    A decision is a step where the search chose from two or more states, and at least
+    one of them reaches the goal. The best states are those with the fewest moves to
+    the goal. The oracle regret of a decision is the distance of the chosen state minus
+    the best distance, so 0 is an optimal choice. A chosen state that cannot reach the
+    goal is a dead end, and it has no regret.
+
+    With ``from_start``, the distance of each state from the start, it also counts the
+    choices on a shortest path. A state is on a shortest path when its distance from the
+    start plus its distance to the goal is the length of a shortest path. A decision is
+    contested when the frontier has a state on a shortest path and a state that is not.
+    ``on_path`` counts the contested decisions that took a state on a shortest path.
+    """
+
+    def __init__(self, distance: dict, from_start: dict | None = None,
+                 shortest: int | None = None) -> None:
+        self.distance, self.from_start, self.shortest = distance, from_start, shortest
+        self.decisions = self.optimal = self.regret = self.dead_ends = 0
+        self.contested = self.on_path = 0
+
+    def __call__(self, states: list, index: int, state, forced: bool) -> None:
+        if forced:
+            return
+        reachable = [d for d in map(self.distance.get, states) if d is not None]
+        if reachable:
+            self.add(self.distance.get(state), min(reachable))
+        if self.from_start is not None:
+            on = [self.on_shortest_path(s) for s in states]
+            if any(on) and not all(on):
+                self.contested += 1
+                self.on_path += on[index]
+
+    def on_shortest_path(self, state) -> bool:
+        to_goal, so_far = self.distance.get(state), self.from_start.get(state)
+        return to_goal is not None and so_far is not None and so_far + to_goal == self.shortest
+
+    def add(self, chosen: int | None, best: int) -> None:
+        self.decisions += 1
+        if chosen is None:
+            self.dead_ends += 1
+        else:
+            self.regret += chosen - best
+            self.optimal += chosen == best
+
+    def result(self) -> dict:
+        out = {"decisions": self.decisions, "optimal": self.optimal, "regret": self.regret,
+               "dead_ends": self.dead_ends}
+        if self.from_start is not None:
+            out |= {"contested": self.contested, "on_path": self.on_path}
+        return out
+
+
+def from_start(problem: Problem) -> dict:
+    """The fewest moves from the start to each state that it reaches, for :class:`Tally`."""
+    seen = {problem.start: 0}
+    queue = deque([problem.start])
+    while queue:
+        state = queue.popleft()
+        for child in problem.moves(state):
+            if child not in seen:
+                seen[child] = seen[state] + 1
+                queue.append(child)
+    return seen
+
+
+def tally_trace(steps: list[dict]) -> dict:
+    """The :class:`Tally` result of the steps of a trace file."""
+    tally = Tally({})
+    for s in steps:
+        if not s["forced"] and s["best_distance"] is not None:
+            tally.add(s["chosen_distance"], s["best_distance"])
+    return tally.result()
+
+
+def both(*steps):
+    """One step callback that calls each of ``steps``."""
+    live = [s for s in steps if s is not None]
+    return lambda *args: [s(*args) for s in live] and None
+
+
+def baseline(problem: Problem, rules: Benchmark, observe: Observer | None = None,
+             step=None):
+    def report(expansions: int, frontier: int) -> None:
         if observe is not None:
             observe("classic", expansions, rules.max_expansions, frontier)
 
@@ -120,7 +207,7 @@ def baseline(problem: Problem, rules: Benchmark, observe: Observer | None = None
                       max_expansions=rules.max_expansions,
                       max_frontier=rules.max_frontier,
                       evict=Draws(problem.domain, problem.trial, "evict", "classic"),
-                      observe=step)
+                      observe=report, step=step)
 
 
 def shortest(problem: Problem) -> dict:
@@ -131,12 +218,12 @@ def shortest(problem: Problem) -> dict:
     return distance
 
 
-def wander(problem: Problem, rules: Benchmark):
+def wander(problem: Problem, rules: Benchmark, step=None):
     """The random arm: the search with a state of the frontier chosen at random."""
     return best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
                       choose=random_choice(Draws(problem.domain, problem.trial, "random")),
                       max_expansions=rules.max_expansions, max_frontier=rules.max_frontier,
-                      evict=Draws(problem.domain, problem.trial, "evict", "random"))
+                      evict=Draws(problem.domain, problem.trial, "evict", "random"), step=step)
 
 
 def best(problem: Problem, rules: Benchmark, distance: dict):
@@ -225,8 +312,10 @@ def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
     distance = shortest(problem)
     d = distance[problem.start]
     perfect = best(problem, rules, distance)
-    aimless = wander(problem, rules)
-    classic = baseline(problem, rules, observe)
+    start = from_start(problem)
+    tallies = {arm: Tally(distance, start, d) for arm in ("model", "heuristic", "random")}
+    aimless = wander(problem, rules, tallies["random"])
+    classic = baseline(problem, rules, observe, tallies["heuristic"])
     before = Spend(**{k: v for k, v in vars(spend).items()
                       if k not in ("latencies_ms", "served")})
     first = len(spend.latencies_ms)
@@ -242,7 +331,7 @@ def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
                          choose=choose, max_expansions=cap,
                          max_frontier=rules.max_frontier,
                          evict=Draws(problem.domain, problem.trial, "evict", "model", model),
-                         observe=step, step=tracer)
+                         observe=step, step=both(tracer, tallies["model"]))
     if tracer is not None:
         tracer.write(trace, {"benchmark": label, "chooser": chooser, "model": model,
                              "domain": problem.domain, "heuristic": problem.heuristic_name,
@@ -273,7 +362,8 @@ def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
         retries=spend.retries - before.retries,
         started_utc=started, finished_utc=now(),
         served_models=tuple(sorted(set(spend.served[first:]))),
-        latencies_ms=tuple(spend.latencies_ms[first:]))
+        latencies_ms=tuple(spend.latencies_ms[first:]),
+        choices={arm: tally.result() for arm, tally in tallies.items()})
 
 
 def results_file(results: Path, label: str, chooser: str, problem: Problem) -> Path:

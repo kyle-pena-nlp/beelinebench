@@ -70,11 +70,22 @@ class RunConfig:
 
 
 @dataclass(frozen=True)
+class MiniConfig:
+    """The mini benchmark: the first ``trials`` trials of each domain, with ``choosers``."""
+    trials: int
+    choosers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Config:
     run: RunConfig
     choosers: dict[str, ChooserConfig]
     #: Benchmarks for experiments. Official ones are in ``benchmarks.toml``.
     benchmarks: dict[str, Benchmark]
+    #: ``run --mini``. ``None`` when the config has no ``[mini]`` table.
+    mini: MiniConfig | None = None
+    #: ``case-study``. ``None`` when the config has no ``[case_study]`` table.
+    case_study: "CaseStudyConfig | None" = None
 
 
 def load(path: Path, officials: dict[str, Benchmark]) -> Config:
@@ -107,7 +118,21 @@ def load(path: Path, officials: dict[str, Benchmark]) -> Config:
                       domains=tuple(run["domains"]) if "domains" in run else None,
                       trials=run.get("trials"), max_cost=run.get("max_cost"),
                       max_total_cost=run.get("max_total_cost")),
-        choosers=choosers, benchmarks=customs)
+        choosers=choosers, benchmarks=customs,
+        mini=MiniConfig(trials=data["mini"]["trials"], choosers=tuple(data["mini"]["choosers"]))
+        if "mini" in data else None,
+        case_study=case_study(data["case_study"], choosers) if "case_study" in data else None)
+
+
+def case_study(table: dict, choosers: dict) -> "CaseStudyConfig":
+    from .case_study import CaseStudyConfig
+
+    if table["chooser"] not in choosers:
+        raise ConfigError(f"case_study: no chooser {table['chooser']!r}")
+    return CaseStudyConfig(chooser=table["chooser"], domain=table["domain"],
+                           trials=table["trials"],
+                           representations=tuple(table["representations"]),
+                           orders=tuple(table["orders"]))
 
 
 def unpublished(choosers: dict[str, ChooserConfig]) -> set[str]:

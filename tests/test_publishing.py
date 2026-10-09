@@ -30,6 +30,7 @@ def test_the_index_links_each_page_and_both_figures():
     text = publishing.index(OFFICIALS)
     assert "| [1.0.0](1.0.0.md) |" in text
     assert "(1.0.0.png)" in text and "(1.0.0-frontier.png)" in text
+    assert "(1.0.0-choices.png)" in text
 
 
 def test_the_committed_index_is_up_to_date():

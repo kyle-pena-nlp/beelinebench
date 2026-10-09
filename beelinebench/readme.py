@@ -30,14 +30,23 @@ if TYPE_CHECKING:
 
 TEMPLATE = "README.template.md"
 OUTPUT = "README.md"
+#: Each page that ``readme`` makes: the template, and the page that it writes. The links
+#: and image paths of the placeholders are from the project root, so a page in ``docs/``
+#: uses no figure placeholder.
+PAGES = ((TEMPLATE, OUTPUT), ("docs/model-quirks.template.md", "docs/model-quirks.md"),
+         ("docs/costs.template.md", "docs/costs.md"),
+         ("docs/benchmarks/robustness-case-study.template.md",
+          "docs/benchmarks/{latest}-robustness-case-study.md"),
+         ("CONTRIBUTING.template.md", "CONTRIBUTING.md"))
 
-HEADER = ("<!-- Made by `python -m beelinebench readme` from README.template.md. "
+HEADER = ("<!-- Made by `python -m beelinebench readme` from {}. "
           "Edit the template, then run the command. -->\n\n")
 
 #: The figure of a benchmark, from the project root.
 FIGURE = "docs/benchmarks/{}.png"
 #: For each figure placeholder, the path of its image, from the project root.
-FIGURES = {"results_figure": FIGURE, "frontier_figure": "docs/benchmarks/{}-frontier.png"}
+FIGURES = {"results_figure": FIGURE, "frontier_figure": "docs/benchmarks/{}-frontier.png",
+           "choices_figure": "docs/benchmarks/{}-choices.png"}
 
 PLACEHOLDER = re.compile(r"(?<!\\)\{\{\s*([a-z_]+)(?:\s+([^\s}]+))?\s*\}\}")
 
@@ -100,20 +109,25 @@ def tokens_per_trial(path: Path) -> tuple[float, float, int] | None:
             sum(r.output_tokens for r in records) / len(records), len(records))
 
 
-def costs_table(b: Benchmark, results: Path, choosers: Mapping[str, ChooserConfig]) -> str:
+def costs_table(b: Benchmark, results: Path, choosers: Mapping[str, ChooserConfig],
+                trials: int | None = None, only: Collection[str] | None = None) -> str:
     """The estimated price of a full run of ``b`` for each chooser that has a price.
 
     A full run is ``b.trials`` trials of each domain. The estimate uses the mean
     tokens of a trial that the chooser used. For a domain without results of the
     chooser, it uses those of the chooser with the most trials in that domain and the
     same kind of prompt: a Claude model gets a longer prompt than a choice model.
+
+    With ``trials`` and ``only``, it is a run of trials 1 to ``trials`` of those choosers:
+    the mini benchmark. The token counts still come from all the trials of the results.
     """
+    runs = trials or b.trials
     def path(name: str, domain: str) -> Path:
         return results / b.name / name / f"{domain}.{b.domains[domain]['heuristic']}.jsonl"
 
-    rows = []
+    rows, estimates = [], []
     for c in choosers.values():
-        if c.price_input is None or not c.publish:
+        if c.price_input is None or not c.publish or (only is not None and c.name not in only):
             continue
         tokens_in = tokens_out = 0.0
         measured, borrowed = 0, set()
@@ -130,12 +144,13 @@ def costs_table(b: Benchmark, results: Path, choosers: Mapping[str, ChooserConfi
                 borrowed.add(title)
             else:
                 measured += found[2]
-            tokens_in += found[0] * b.trials
-            tokens_out += found[1] * b.trials
+            tokens_in += found[0] * runs
+            tokens_out += found[1] * runs
         if tokens_in is None:
             rows.append(f"| {c.title} | {price(c)} | — | — | no results to estimate from |")
             continue
         cost = tokens_in / 1e6 * c.price_input + tokens_out / 1e6 * (c.price_output or 0)
+        estimates.append(cost)
         basis = []
         if measured:
             basis.append(f"measured on {measured:,} trials")
@@ -145,8 +160,12 @@ def costs_table(b: Benchmark, results: Path, choosers: Mapping[str, ChooserConfi
                     f"${cost:,.2f} | {'; '.join(basis)} |")
     if not rows:
         return "No chooser has a price."
-    return ("| model | price for a million tokens | input tokens of a full run | estimated price "
-            "of a full run | basis |\n|---|---|---|---|---|\n" + "\n".join(rows))
+    run = "a mini run" if trials else "a full run"
+    total = ""
+    if only is not None:
+        total = f"\n\nAll the mini models together: about ${sum(estimates):,.2f}."
+    return (f"| model | price for a million tokens | input tokens of {run} | estimated price "
+            f"of {run} | basis |\n|---|---|---|---|---|\n" + "\n".join(rows) + total)
 
 
 def amount(tokens: float) -> str:
@@ -164,8 +183,62 @@ def price(c: ChooserConfig) -> str:
     return f"{dollars(c.price_input)} input, {out}"
 
 
+#: The page and the figure of the robustness case study of a benchmark, from the project root.
+CASE_STUDY_PAGE = "docs/benchmarks/{}-robustness-case-study.md"
+CASE_STUDY_FIGURE = "docs/benchmarks/{}-robustness-case-study.png"
+
+
+def pages(officials: dict[str, Benchmark]) -> list[tuple[str, str]]:
+    """:data:`PAGES`, with the newest benchmark version in the paths that name one."""
+    latest = list(officials)[-1]
+    return [(source, out.format(latest=latest)) for source, out in PAGES]
+
+
+def case_study_table(officials: dict[str, Benchmark], results: Path, study,
+                     model: str) -> str:
+    """The rows of the case study figure as tables, one for each group."""
+    from .domains import TITLES
+    from .plot import case_study_rows, score_text
+
+    if study is None:
+        return "The config has no case study."
+    groups = case_study_rows(study, results, officials[list(officials)[-1]])
+    if not any(row.trials for _, group in groups for row in group if not row.reference):
+        return "No case study results yet. Run `uv run python -m beelinebench case-study`."
+    out = [f"The model is {model}, and the problem is "
+           f"{TITLES.get(study.domain, study.domain)}, trials 1 to {study.trials}. The rows are "
+           "in the order of the figure, best first.\n"]
+    for title, group in groups:
+        lines = [f"#### {title}\n", "| | trials | score | 95% interval |", "|---|---|---|---|"]
+        lines += [f"| {row.label} | {row.trials} | {score_text(row.score)} | "
+                  f"{score_text(row.low)} to {score_text(row.high)} |" for row in group]
+        out.append("\n".join(lines) + "\n")
+    return "\n".join(out)
+
+
 #: The page of a benchmark, from the project root.
 PAGE = "docs/benchmarks/{}.md"
+#: The hand-written commentary of a benchmark, from the project root. It can hold
+#: placeholders, and it uses no headings and no relative links, because the README and the
+#: page of the benchmark both show it.
+COMMENTARY = "docs/benchmarks/{}-commentary.md"
+
+
+def refusal_share(b: Benchmark, results: Path, argument: str, fallback: bool) -> str:
+    """The share of refused requests, or of decisions that used the fallback.
+
+    ``argument`` is ``<chooser>:<domain>``, for example ``luna:rush_hour``.
+    """
+    chooser, domain = argument.split(":")
+    records = read(results / b.name / chooser / f"{domain}.{b.domains[domain]['heuristic']}.jsonl")
+    requests = sum(r.requests for r in records)
+    if not requests:
+        return "—"
+    refused = sum(r.refusals for r in records)
+    if not fallback:
+        return f"{100 * refused / requests:.0f}%"
+    invalid = sum(r.invalid_answers for r in records)
+    return f"{100 * invalid / (requests - (refused - invalid)):.0f}%"
 
 
 def interval_text(row) -> str:
@@ -174,7 +247,8 @@ def interval_text(row) -> str:
 
 
 def results_section(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
-                    hidden: Collection[str] = (), prices: Mapping = {}) -> str:
+                    hidden: Collection[str] = (), prices: Mapping = {},
+                    trials: int | None = None, only: Collection[str] | None = None) -> str:
     """The results part of the page of ``b``: both figures, and their data as tables.
 
     The tables hold the rows of the figures, in the same order, so a reader without the
@@ -182,7 +256,7 @@ def results_section(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
     """
     from .plot import convex_frontier, rows, score_text
 
-    groups = rows(b, results, labels, hidden, prices)
+    groups = rows(b, results, labels, hidden, prices, trials, only)
     if not groups:
         return ("## Results\n\nNo results yet. Run it with:\n\n```bash\n"
                 f"uv run python -m beelinebench run --benchmark {b.name}\n"
@@ -221,6 +295,39 @@ def results_section(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
                       f"{'yes' if r.label in efficient else ''} |"
                       for r in sorted(models, key=lambda r: -r.score)]
             out.append("\n".join(lines) + "\n")
+    out.append(choices_section(b, results, labels, hidden, trials, only))
+    return "\n".join(out)
+
+
+def choices_section(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
+                    hidden: Collection[str] = (), trials: int | None = None,
+                    only: Collection[str] | None = None) -> str:
+    """The choices figure of ``b``, and its data as tables, with the oracle regret."""
+    from .plot import choice_tallies, mean_regret, share
+
+    found = choice_tallies(b, results, labels, hidden, trials, only)
+    if not found:
+        return ""
+    out = [f"![The share of decisions that matched the oracle for each model and heuristic in "
+           f"benchmark {b.name}, by domain, with 95% intervals]({b.name}-choices.png)\n\n"
+           "### Choices against the oracle as text\n\n"
+           "A decision is a step with two or more states on the frontier, and at least one of "
+           "them can reach the goal. The oracle regret of a decision is the moves to the goal "
+           "from the chosen state, minus the fewest moves from a state of the frontier. So an "
+           "optimal choice has a regret of 0. A dead end is a chosen state that cannot reach the "
+           "goal. Each column is a mean over trials, so each trial counts the same.\n"]
+    for title, _, arms in found:
+        lines = [f"#### {title}\n",
+                 "| | trials | matched the oracle | mean regret | dead ends |", "|---|---|---|---|---|"]
+        ranked = sorted(arms, key=lambda arm: -sum(map(share, arm[4])) / len(arm[4]))
+        for label, _, _, _, tallies in ranked:
+            regrets = [m for m in map(mean_regret, tallies) if m is not None]
+            dead = sum(t["dead_ends"] / t["decisions"] for t in tallies) / len(tallies)
+            lines.append(f"| {label} | {len(tallies)} | "
+                         f"{100 * sum(map(share, tallies)) / len(tallies):.0f}% | "
+                         f"{sum(regrets) / len(regrets):.2f} | {100 * dead:.1f}% |"
+                         if regrets else f"| {label} | {len(tallies)} | — | — | — |")
+        out.append("\n".join(lines) + "\n")
     return "\n".join(out)
 
 
@@ -229,8 +336,39 @@ def dollars_per_thousand(value: float) -> str:
     return f"${value:#.2g}" if value < 10 else f"${value:,.0f}"
 
 
+def refusals_table(b: Benchmark, results: Path, chooser: str) -> str:
+    """The refusals of ``chooser`` in ``b``, in all and for each domain.
+
+    A decision is one choice of the search. A refused question is asked once more, so a
+    decision with one refusal takes two requests. After a second refusal, the decision
+    takes the fallback, and it counts as an invalid answer.
+    """
+    from .domains import TITLES
+
+    lines, total_requests, total_refusals = [], 0, 0
+    for domain, settings in b.domains.items():
+        records = read(results / b.name / chooser / f"{domain}.{settings['heuristic']}.jsonl")
+        requests = sum(r.requests for r in records)
+        if not requests:
+            continue
+        refused = sum(r.refusals for r in records)
+        fallback = sum(r.invalid_answers for r in records)
+        decisions = requests - (refused - fallback)
+        total_requests += requests
+        total_refusals += refused
+        trials = "" if len(records) == b.trials else f" ({len(records)} of {b.trials} trials)"
+        lines.append(f"| {TITLES.get(domain, domain)}{trials} | {100 * refused / requests:.1f}% "
+                     f"| {100 * fallback / decisions:.1f}% |")
+    if not lines:
+        return f"No results of `{chooser}` in benchmark {b.name} yet."
+    return (f"In benchmark {b.name}, the API refused {total_refusals:,} of {total_requests:,} "
+            f"requests ({100 * total_refusals / total_requests:.0f}%). The refusals are not "
+            "equal in the domains:\n\n| domain | refused requests | decisions that used the "
+            "fallback |\n|---|---|---|\n" + "\n".join(lines))
+
+
 def placeholders(officials: dict[str, Benchmark], results: Path,
-                 choosers: Mapping[str, ChooserConfig] | None = None
+                 choosers: Mapping[str, ChooserConfig] | None = None, mini=None, study=None
                  ) -> dict[str, Callable[[str | None], str]]:
     """Each placeholder name, and the function that gives its text."""
     latest = list(officials)[-1]
@@ -250,6 +388,10 @@ def placeholders(officials: dict[str, Benchmark], results: Path,
         "results_figure": lambda argument: (
             f"![The scores of each model and heuristic in benchmark {official(argument).name}, "
             f"by domain, with 95% intervals]({FIGURE.format(official(argument).name)})"),
+        "choices_figure": lambda argument: (
+            f"![The share of decisions that matched the oracle for each model and heuristic in "
+            f"benchmark {official(argument).name}, by domain, with 95% intervals]"
+            f"({FIGURES['choices_figure'].format(official(argument).name)})"),
         "frontier_figure": lambda argument: (
             f"![The score against the cost of a step for each model in benchmark "
             f"{official(argument).name}, by domain, with the efficient frontier]"
@@ -257,7 +399,21 @@ def placeholders(officials: dict[str, Benchmark], results: Path,
         "trials": lambda argument: str(official(argument).trials),
         "max_expansions": lambda argument: f"{official(argument).max_expansions:,}",
         "domain_count": lambda argument: str(len(official(argument).domains)),
+        # The argument is a chooser, for example \{{ refusals luna }}.
+        "refusals": lambda argument: refusals_table(official(None), results, argument or "luna"),
+        # The argument is <chooser>:<domain>, for example \{{ refused luna:rush_hour }}.
+        "refused": lambda argument: refusal_share(official(None), results, argument, False),
+        "fallback": lambda argument: refusal_share(official(None), results, argument, True),
         "costs": lambda argument: costs_table(official(argument), results, choosers or {}),
+        "mini_costs": lambda argument: costs_table(
+            official(argument), results, choosers or {},
+            trials=mini.trials if mini else None, only=set(mini.choosers) if mini else set()),
+        "mini_trials": lambda argument: str(mini.trials if mini else 0),
+        "case_study": lambda argument: case_study_table(
+            officials, results, study,
+            (choosers or {})[study.chooser].title if study and choosers else ""),
+        "case_study_link": lambda argument: (
+            f"[robustness case study]({CASE_STUDY_PAGE.format(official(argument).name)})"),
     }
 
 
@@ -268,9 +424,27 @@ def figures(template: str, officials: dict[str, Benchmark]) -> list[tuple[str, s
                    for match in PLACEHOLDER.finditer(template) if match.group(1) in FIGURES})
 
 
+def commentary(name: str, officials: dict[str, Benchmark], results: Path,
+               choosers: Mapping[str, ChooserConfig] | None = None, mini=None) -> str:
+    """The commentary of benchmark ``name``, with its placeholders replaced. "" if none."""
+    path = results.parent / COMMENTARY.format(name)
+    if not path.exists():
+        return ""
+    known = placeholders(officials, results, choosers, mini)
+    # A comment at the top is for the author, not the reader.
+    text = re.sub(r"\A\s*<!--.*?-->", "", path.read_text(), flags=re.S)
+    return PLACEHOLDER.sub(lambda m: known[m.group(1)](m.group(2)),
+                           text).replace("\\{{", "{{").strip()
+
+
 def render(template: str, officials: dict[str, Benchmark], results: Path,
-           choosers: Mapping[str, ChooserConfig] | None = None) -> str:
-    known = placeholders(officials, results, choosers)
+           choosers: Mapping[str, ChooserConfig] | None = None, source: str = TEMPLATE,
+           mini=None, study=None) -> str:
+    known = placeholders(officials, results, choosers, mini, study)
+    latest = list(officials)[-1]
+    known["commentary"] = lambda argument: (
+        commentary(argument or latest, officials, results, choosers, mini)
+        or f"No commentary for benchmark {argument or latest} yet.")
 
     def replace(match: re.Match[str]) -> str:
         name, argument = match.group(1), match.group(2)
@@ -279,4 +453,4 @@ def render(template: str, officials: dict[str, Benchmark], results: Path,
                              f"Known: {', '.join(known)}")
         return known[name](argument)
 
-    return HEADER + PLACEHOLDER.sub(replace, template).replace("\\{{", "{{")
+    return HEADER.format(source) + PLACEHOLDER.sub(replace, template).replace("\\{{", "{{")

@@ -45,7 +45,7 @@ TICKS = (0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0)
 
 #: The look of the figures. A change of the look changes this number, so that
 #: ``readme`` draws the figures again.
-STYLE = 27
+STYLE = 29
 
 #: The PNG text key that holds the fingerprint of the rows.
 FINGERPRINT_KEY = "beelinebench-rows"
@@ -73,14 +73,17 @@ Prices = Mapping[str, tuple[float, float]]
 
 
 def rows(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
-         hidden: Collection[str] = (), prices: Prices = {}) -> list[tuple[str, list[Row]]]:
+         hidden: Collection[str] = (), prices: Prices = {}, trials: int | None = None,
+         only: Collection[str] | None = None) -> list[tuple[str, list[Row]]]:
     """For each domain of ``b`` with results: a row for the heuristic and for each chooser, best first.
 
     ``labels`` gives the name of a chooser for a reader. A chooser without one
-    keeps its own name. The choosers in ``hidden`` are left out.
+    keeps its own name. The choosers in ``hidden`` are left out. With ``trials``, only
+    trials 1 to ``trials`` count, and with ``only``, only those choosers: the mini benchmark.
     """
     choosers = sorted(p.name for p in (results / b.name).glob("*")
-                      if p.is_dir() and p.name not in hidden)
+                      if p.is_dir() and p.name not in hidden
+                      and (only is None or p.name in only))
     groups = []
     for domain, settings in b.domains.items():
         heuristic = settings["heuristic"]
@@ -88,7 +91,7 @@ def rows(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
         found, classic = [], {}
         for name in choosers:
             records = [r for r in read(results / b.name / name / f"{stem}.jsonl")
-                       if r.score is not None]
+                       if r.score is not None and (trials is None or r.trial <= trials)]
             if not records:
                 continue
             for r in records:
@@ -128,17 +131,97 @@ def rows(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
     return groups
 
 
+def mean_interval(values: list[float], draws: Draws) -> tuple[float, float]:
+    """The 95% bootstrap interval of the arithmetic mean of ``values``."""
+    means = sorted(sum(draws.choice(values) for _ in values) / len(values) for _ in range(2000))
+    return means[49], means[1949]
+
+
+def share(tally: dict) -> float:
+    """The share of the decisions of one arm in one trial that matched the oracle."""
+    return tally["optimal"] / tally["decisions"]
+
+
+def choice_tallies(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
+                   hidden: Collection[str] = (), trials: int | None = None,
+                   only: Collection[str] | None = None):
+    """For each domain with choices: its title, and for each arm its label, whether it is a
+    reference arm, its mark, the bootstrap name, and the tally of each trial.
+
+    A trial with no decision, or without choices in its record, is left out. ``trials``
+    and ``only`` are as for :func:`rows`.
+    """
+    choosers = sorted(p.name for p in (results / b.name).glob("*")
+                      if p.is_dir() and p.name not in hidden
+                      and (only is None or p.name in only))
+    out = []
+    for domain, settings in b.domains.items():
+        heuristic = settings["heuristic"]
+        stem = f"{domain}.{heuristic}"
+        arms, references = [], {}
+        for name in choosers:
+            records = [r for r in read(results / b.name / name / f"{stem}.jsonl")
+                       if r.choices and (trials is None or r.trial <= trials)]
+            for r in records:
+                references.setdefault(r.trial, r.choices)
+            tallies = [r.choices["model"] for r in records
+                       if r.choices.get("model", {}).get("decisions")]
+            if tallies:
+                arms.append((labels.get(name, name), False, "D", name, tallies))
+        if not arms:
+            continue
+        for arm, label, marker in (
+                ("heuristic", f"Heuristic: {HEURISTIC_TITLES.get(heuristic, heuristic)}", "D"),
+                ("random", "Random choice", "o")):
+            tallies = [c[arm] for _, c in sorted(references.items()) if c[arm]["decisions"]]
+            if tallies:
+                arms.append((label, True, marker, arm, tallies))
+        out.append((TITLES.get(domain, domain), stem, arms))
+    return out
+
+
+def choice_rows(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
+                hidden: Collection[str] = (), trials: int | None = None,
+                only: Collection[str] | None = None) -> list[tuple[str, list[Row]]]:
+    """For each domain: the share of decisions that matched the oracle, best first.
+
+    A row is a model, or the heuristic or random arm. Its score is the mean over trials of
+    the share of a trial's decisions that took a state with the fewest moves to the goal,
+    so each trial counts the same.
+    """
+    groups = []
+    for title, stem, arms in choice_tallies(b, results, labels, hidden, trials, only):
+        found = []
+        for label, reference, marker, key, tallies in arms:
+            shares = [share(t) for t in tallies]
+            low, high = mean_interval(shares, Draws("bootstrap", b.name, key, stem, "choices"))
+            found.append(Row(label, sum(shares) / len(shares), low, high, len(shares), "",
+                             reference=reference, marker=marker))
+        groups.append((title, sorted(found, key=lambda row: -row.score)))
+    return groups
+
+
+def mean_regret(tally: dict) -> float | None:
+    """The mean oracle regret of the decisions of one trial that did not take a dead end."""
+    counted = tally["decisions"] - tally["dead_ends"]
+    return tally["regret"] / counted if counted else None
+
+
 def score_text(score: float) -> str:
     """Two decimals, or two significant digits for a score below 0.01, for example 0.0041."""
     return f"{score:.2f}" if score >= 0.01 else f"{score:#.2g}"
 
 
 def fingerprint(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
-                hidden: Collection[str] = (), prices: Prices = {}, kind: str = "scores") -> str:
+                hidden: Collection[str] = (), prices: Prices = {}, kind: str = "scores",
+                trials: int | None = None, only: Collection[str] | None = None) -> str:
     """A hash of everything the figure of ``b`` shows: its rows, and the limit in its notes."""
     groups = [[title, [[round(v, 6) if isinstance(v, float) else v for v in astuple(row)]
-                       for row in group]] for title, group in rows(b, results, labels, hidden, prices)]
-    data = json.dumps([STYLE, kind, b.name, b.max_expansions, groups], sort_keys=True)
+                       for row in group]]
+              for title, group in (choice_rows(b, results, labels, hidden, trials, only)
+                                   if kind == "choices"
+                                   else rows(b, results, labels, hidden, prices, trials, only))]
+    data = json.dumps([STYLE, kind, b.name, b.max_expansions, trials, groups], sort_keys=True)
     return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
@@ -170,9 +253,16 @@ def stored_fingerprint(png: Path) -> str | None:
 
 
 def is_current(png: Path, b: Benchmark, results: Path, labels: Mapping[str, str] = {},
-               hidden: Collection[str] = (), prices: Prices = {}, kind: str = "scores") -> bool:
+               hidden: Collection[str] = (), prices: Prices = {}, kind: str = "scores",
+               trials: int | None = None, only: Collection[str] | None = None) -> bool:
     """Whether ``png`` shows the current results of ``b``."""
-    return stored_fingerprint(png) == fingerprint(b, results, labels, hidden, prices, kind)
+    return stored_fingerprint(png) == fingerprint(b, results, labels, hidden, prices, kind,
+                                                  trials, only)
+
+
+def title_name(b: Benchmark, trials: int | None) -> str:
+    """The name of the benchmark in a title: ``1.0.0``, or ``1.0.0 mini``."""
+    return b.name if trials is None else f"{b.name} mini"
 
 
 #: The height in inches above the plot for the title and its subtitle.
@@ -189,22 +279,61 @@ def titled(fig, title: str, subtitle: str) -> float:
 
 
 def draw(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
-         hidden: Collection[str] = ()) -> None:
+         hidden: Collection[str] = (), trials: int | None = None,
+         only: Collection[str] | None = None) -> None:
+    groups = rows(b, results, labels, hidden, trials=trials, only=only)
+    if not groups:
+        raise ValueError(f"no results for benchmark {b.name}")
+    notes = (f"Benchmark {title_name(b, trials)}. A mark is the geometric mean over n trials, "
+             "and a band is its 95% bootstrap interval.\nAn open circle is random choice: a "
+             "state of the frontier at random. The vertical line at 1.0 is a perfect search.")
+    marks = {mark for _, group in groups for row in group for mark in row.marks}
+    if "*" in marks or "†" in marks:
+        notes += (f"\n* or †: at least one model (*) or heuristic (†) run did not solve within "
+                  f"{b.max_expansions:,} nodes, so the true score is lower.")
+    forest(groups, out, title=f"BeelineBench {title_name(b, trials)}",
+           subtitle="The score of each model, heuristic and random choice, by problem. "
+                    "Higher is better, and 1.0 is a perfect search.",
+           xlabel="score = (shortest path + 1) / nodes explored   ·   log scale, higher is "
+                  "better", notes=notes, log=True,
+           stamp=fingerprint(b, results, labels, hidden, trials=trials, only=only))
+
+
+def draw_choices(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
+                 hidden: Collection[str] = (), trials: int | None = None,
+                 only: Collection[str] | None = None) -> None:
+    """The share of decisions that matched the oracle, for each arm, by domain."""
+    groups = choice_rows(b, results, labels, hidden, trials, only)
+    if not groups:
+        raise ValueError(f"no choices for benchmark {b.name}")
+    notes = (f"Benchmark {title_name(b, trials)}. A decision is a step with two or more states "
+             "on the frontier.\nIt matches the oracle when it takes a state with the fewest moves "
+             "to the goal. A mark is the mean over n trials of the share\nof a trial's decisions "
+             "that matched, and a band is its 95% bootstrap interval. An open circle is random "
+             "choice.")
+    forest(groups, out, title=f"BeelineBench {title_name(b, trials)}: choices against the oracle",
+           subtitle="The share of decisions that took a state with the fewest moves to the goal, "
+                    "by problem. Higher is better.",
+           xlabel="share of decisions that matched the oracle", notes=notes, log=False,
+           stamp=fingerprint(b, results, labels, hidden, kind="choices", trials=trials,
+                             only=only))
+
+
+def forest(groups: list[tuple[str, list[Row]]], out: Path, *, title: str, subtitle: str,
+           xlabel: str, notes: str, log: bool, stamp: str) -> None:
+    """Rows of marks and bands, grouped by domain, with a title, notes and a fingerprint."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FixedLocator, NullLocator
 
-    groups = rows(b, results, labels, hidden)
-    if not groups:
-        raise ValueError(f"no results for benchmark {b.name}")
     # Top to bottom: a header line for each domain, its rows, then a gap.
     placed: list[tuple[float, Row]] = []
     headers: list[tuple[float, str]] = []
     y = 0.0
-    for title, group in groups:
-        headers.append((y, title))
+    for heading, group in groups:
+        headers.append((y, heading))
         y += 1
         for row in group:
             placed.append((y, row))
@@ -214,16 +343,17 @@ def draw(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
 
     plt.rcParams.update({"font.size": 10, "font.family": "sans-serif"})
     fig, ax = plt.subplots(figsize=(8.5, 0.27 * height + 1.3 + TITLE_SPACE), facecolor=SURFACE)
-    top = titled(fig, f"BeelineBench {b.name}: how efficiently each model searches",
-                 "The score of each model, heuristic and random choice, by problem. "
-                 "Higher is better, and 1.0 is a perfect search.")
+    top = titled(fig, title, subtitle)
     ax.set_facecolor(SURFACE)
-    ax.set_xscale("log")
-    lowest = min(row.low for _, row in placed)
-    ax.set_xlim(lowest / 1.3, 2.0)
+    if log:
+        ax.set_xscale("log")
+        lowest = min(row.low for _, row in placed)
+        ax.set_xlim(lowest / 1.3, 2.0)
+        ax.xaxis.set_major_locator(FixedLocator([t for t in TICKS if t >= lowest / 1.3]))
+    else:
+        ax.set_xlim(0, 1.15)
+        ax.xaxis.set_major_locator(FixedLocator([0, 0.2, 0.4, 0.6, 0.8, 1.0]))
     ax.set_ylim(height - 0.3, -0.7)
-
-    ax.xaxis.set_major_locator(FixedLocator([t for t in TICKS if t >= lowest / 1.3]))
     ax.xaxis.set_minor_locator(NullLocator())
     ax.xaxis.set_major_formatter(lambda value, _: f"{value:g}")
     ax.grid(axis="x", color=GRID, linewidth=0.8)
@@ -236,35 +366,27 @@ def draw(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
         ax.plot(row.score, y, marker=row.marker, markersize=7, markeredgewidth=1.5,
                 color=SURFACE if row.marker == "o" else MARK, markeredgecolor=MARK)
         # A surface box keeps the label legible where it crosses the line at 1.0.
-        ax.text(row.high * 1.07, y, f"{score_text(row.score)}{row.marks}", color=TEXT, fontsize=9,
+        ax.text(row.high * 1.07 if log else row.high + 0.015, y,
+                f"{score_text(row.score)}{row.marks}", color=TEXT, fontsize=9,
                 va="center", bbox=dict(boxstyle="square,pad=0.1", facecolor=SURFACE,
                                        edgecolor="none"))
 
     ax.set_yticks([y for y, _ in placed],
                   [f"{row.label}  ·  n={row.trials}" for _, row in placed], color=TEXT)
-    for y, title in headers:
-        ax.text(-0.02, y, title, transform=ax.get_yaxis_transform(), ha="right", va="center",
-                fontsize=10.5, fontweight="bold", color=TEXT)
+    for y, heading in headers:
+        ax.text(-0.02, y, heading, transform=ax.get_yaxis_transform(), ha="right",
+                va="center", fontsize=10.5, fontweight="bold", color=TEXT)
     ax.tick_params(axis="y", length=0, pad=8)
     ax.tick_params(axis="x", colors=MUTED, length=0)
     for side in ("top", "right", "left"):
         ax.spines[side].set_visible(False)
     ax.spines["bottom"].set_color(GRID)
 
-    ax.set_xlabel("score = (shortest path + 1) / nodes explored   ·   log scale, higher is "
-                  "better", color=MUTED, fontsize=9)
-    notes = (f"Benchmark {b.name}. A mark is the geometric mean over n trials, and a band "
-             "is its 95% bootstrap interval.\nAn open circle is random choice: a state of the "
-             "frontier at random. The vertical line at 1.0 is a perfect search.")
-    marks = {mark for _, row in placed for mark in row.marks}
-    if "*" in marks or "†" in marks:
-        notes += (f"\n* or †: at least one model (*) or heuristic (†) run did not solve within "
-                  f"{b.max_expansions:,} nodes, so the true score is lower.")
+    ax.set_xlabel(xlabel, color=MUTED, fontsize=9)
     fig.tight_layout(rect=(0, 0.02 + 0.016 * (notes.count("\n") + 1), 1, top))
     fig.text(0.01, 0.008, notes, color=MUTED, fontsize=8, va="bottom")
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=200, facecolor=SURFACE,
-                metadata={FINGERPRINT_KEY: fingerprint(b, results, labels, hidden)})
+    fig.savefig(out, dpi=200, facecolor=SURFACE, metadata={FINGERPRINT_KEY: stamp})
     plt.close(fig)
 
 
@@ -310,7 +432,8 @@ def convex_frontier(points: list[Row]) -> list[Row]:
 
 
 def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
-                  hidden: Collection[str] = (), prices: Prices = {}) -> None:
+                  hidden: Collection[str] = (), prices: Prices = {}, trials: int | None = None,
+                  only: Collection[str] | None = None) -> None:
     """The cost of a step against the score, one panel for each domain, with the frontier.
 
     A step is one request: the model chooses one state of the frontier. The cost is
@@ -324,7 +447,7 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
     from matplotlib.ticker import FixedLocator, LogLocator, NullFormatter
 
     groups = [(title, [r for r in group if r.cost_per_step and not r.reference])
-              for title, group in rows(b, results, labels, hidden, prices)]
+              for title, group in rows(b, results, labels, hidden, prices, trials, only)]
     groups = [(title, models) for title, models in groups if models]
     if not groups:
         raise ValueError(f"no priced results for benchmark {b.name}")
@@ -337,9 +460,9 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
     panels = (len(groups) + columns - 1) // columns
     fig, axes = plt.subplots(panels, columns, figsize=(9, 3.8 * panels + TITLE_SPACE), facecolor=SURFACE,
                              sharex=True, sharey=True, squeeze=False)
-    top = titled(fig, f"BeelineBench {b.name}: score and cost",
+    top = titled(fig, f"BeelineBench {title_name(b, trials)}: Efficient Frontier for Score vs. Cost",
                  "The score of each model against its cost per 1,000 steps, by problem. "
-                 "Upper right is better. The line is the efficient frontier.")
+                 "Upper right is better.")
     cells = list(axes.flat)
     names = sorted({r.label for r in points})
     marks = {name: MODEL_MARKS[n % len(MODEL_MARKS)] for n, name in enumerate(names)}
@@ -410,5 +533,51 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
     fig.text(0.01, 0.006, notes, color=MUTED, fontsize=8, va="bottom")
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=200, facecolor=SURFACE, metadata={
-        FINGERPRINT_KEY: fingerprint(b, results, labels, hidden, prices, kind="frontier")})
+        FINGERPRINT_KEY: fingerprint(b, results, labels, hidden, prices, kind="frontier",
+                                     trials=trials, only=only)})
     plt.close(fig)
+
+
+def case_study_rows(study, results: Path, b: Benchmark) -> list[tuple[str, list[Row]]]:
+    """The rows of the case study figure: the representations, then the option orders."""
+    from .case_study import lines, summary
+
+    heuristic = b.domains[study.domain]["heuristic"]
+    groups = []
+    for title, found in lines(study, results, b.name, heuristic):
+        out = []
+        for line in found:
+            score, low, high = summary(line, (study.chooser, study.domain, title, line.label))
+            label = (f"Heuristic: {HEURISTIC_TITLES.get(heuristic, heuristic)}"
+                     if line.label == "Heuristic" else line.label)
+            out.append(Row(label, score, low, high, len(line.scores), "",
+                           reference=line.reference, marker=line.marker))
+        groups.append((title, out))
+    return groups
+
+
+def case_study_fingerprint(study, results: Path, b: Benchmark, model: str) -> str:
+    groups = [[title, [[round(v, 6) if isinstance(v, float) else v for v in astuple(row)]
+                       for row in group]] for title, group in case_study_rows(study, results, b)]
+    data = json.dumps([STYLE, "case-study", b.name, model, groups], sort_keys=True)
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+
+def draw_case_study(study, results: Path, out: Path, b: Benchmark, model: str) -> None:
+    """The score of one model on one problem, for each representation and option order."""
+    from .domains import TITLES
+
+    groups = case_study_rows(study, results, b)
+    if not groups:
+        raise ValueError("no case study results")
+    problem = TITLES.get(study.domain, study.domain)
+    notes = (f"Benchmark {b.name}, {problem}, trials 1 to {study.trials}. A mark is the geometric "
+             "mean over n trials, and a band is its 95% bootstrap interval.\nEach representation "
+             "uses the random option order of the benchmark, and each option order uses the "
+             "first representation.\nThe heuristic and random choice are the same in each group.")
+    forest(groups, out, title=f"Case study: {model} on {problem}",
+           subtitle="How the text of the states and the order of the options change the score. "
+                    "Higher is better, and 1.0 is a perfect search.",
+           xlabel="score = (shortest path + 1) / nodes explored   ·   log scale, higher is "
+                  "better", notes=notes, log=True,
+           stamp=case_study_fingerprint(study, results, b, model))

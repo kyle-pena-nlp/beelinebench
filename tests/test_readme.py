@@ -23,11 +23,11 @@ def record(trial: int, score: float, censored: bool = False) -> dict:
 def test_the_committed_readme_is_up_to_date():
     from beelinebench import config
 
-    template = (PROJECT / readme.TEMPLATE).read_text()
-    choosers = config.load(PROJECT / "beelinebench.toml", OFFICIALS).choosers
-    made = readme.render(template, OFFICIALS, PROJECT / "results", choosers)
-    assert (PROJECT / readme.OUTPUT).read_text() == made, \
-        "run `python -m beelinebench readme`"
+    cfg = config.load(PROJECT / "beelinebench.toml", OFFICIALS)
+    for source, out in readme.pages(OFFICIALS):
+        made = readme.render((PROJECT / source).read_text(), OFFICIALS, PROJECT / "results",
+                             cfg.choosers, source, cfg.mini, cfg.case_study)
+        assert (PROJECT / out).read_text() == made, f"run `python -m beelinebench readme`: {out}"
 
 
 def test_placeholders_are_replaced(tmp_path):
@@ -36,19 +36,19 @@ def test_placeholders_are_replaced(tmp_path):
     path.write_text("".join(json.dumps(record(n, 0.8)) + "\n" for n in (1, 2)))
     made = readme.render("v{{ latest_benchmark }}, {{trials}} trials\n{{ results 1.0.0 }}",
                          OFFICIALS, tmp_path)
-    assert made.startswith(readme.HEADER + "v1.0.0, 100 trials\n| chooser |")
+    assert made.startswith(readme.HEADER.format(readme.TEMPLATE) + "v1.0.0, 100 trials\n| chooser |")
     assert "| `fake` | `tiles` | `manhattan` | 2 of 100 | 0.800 | 0.800 to 0.800 | 0.500 " \
            "| 1.000 | 1.00 | 2 of 2 | 0.0% | fake-1 | 2026-10-01 |" in made
 
 
 def test_no_results(tmp_path):
     assert readme.render("{{ results }}", OFFICIALS, tmp_path) == \
-        readme.HEADER + "No results for benchmark 1.0.0 yet."
+        readme.HEADER.format(readme.TEMPLATE) + "No results for benchmark 1.0.0 yet."
 
 
 def test_an_escaped_placeholder_is_text(tmp_path):
     assert readme.render(r"`\{{ results }}`", OFFICIALS, tmp_path) == \
-        readme.HEADER + "`{{ results }}`"
+        readme.HEADER.format(readme.TEMPLATE) + "`{{ results }}`"
 
 
 @pytest.mark.parametrize("text", ["{{ result }}", "{{ results 9.9.9 }}"])
@@ -66,7 +66,8 @@ def test_the_committed_figure_shows_the_current_results():
               for c in choosers.values() if c.price_input is not None}
     for kind, name in readme.figures((PROJECT / readme.TEMPLATE).read_text(), OFFICIALS):
         png = PROJECT / readme.FIGURES[kind].format(name)
-        extra = dict(prices=prices, kind="frontier") if kind == "frontier_figure" else {}
+        extra = (dict(prices=prices, kind="frontier") if kind == "frontier_figure"
+                 else dict(kind="choices") if kind == "choices_figure" else {})
         assert plot.is_current(png, OFFICIALS[name], PROJECT / "results", labels,
                                config.unpublished(choosers), **extra), \
             "run `python -m beelinebench readme`"
@@ -74,7 +75,7 @@ def test_the_committed_figure_shows_the_current_results():
 
 def test_the_figure_placeholder_is_an_image():
     made = readme.render("{{ results_figure }}", OFFICIALS, PROJECT / "results")
-    assert made == readme.HEADER + (
+    assert made == readme.HEADER.format(readme.TEMPLATE) + (
         "![The scores of each model and heuristic in benchmark 1.0.0, by domain, with 95% "
         "intervals](docs/benchmarks/1.0.0.png)")
     assert readme.figures("{{ results_figure }} {{ results_figure 1.0.0 }} {{ frontier_figure }}",

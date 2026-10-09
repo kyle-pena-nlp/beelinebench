@@ -155,3 +155,100 @@ def problem(trial: int, *, heuristic: str, blocks: int) -> Problem:
         render=facts, objective=("reach a state where all of these facts are true: "
                                  + " ".join(sorted(goal))),
         context=CONTEXT)
+
+
+# Other representations of the same states, for the case study of `python -m beelinebench
+# case-study`. The benchmark uses the facts. Each one writes a state, and the goal, from
+# the same facts, so only the text that the model sees changes.
+
+def stacks(state: State) -> tuple[list[list[str]], str | None]:
+    """The towers of ``state``, each from the table up, and the block in the hand."""
+    above = {}
+    for fact in state:
+        if fact.startswith("(on "):
+            top, below = fact[4:-1].split()
+            above[below] = top
+    out = []
+    for base in sorted(f[9:-1] for f in state if f.startswith("(ontable ")):
+        tower = [base]
+        while tower[-1] in above:
+            tower.append(above[tower[-1]])
+        out.append(tower)
+    held = next((f[9:-1] for f in state if f.startswith("(holding ")), None)
+    return out, held
+
+
+def number(block: str) -> str:
+    return f"block {block[1:]}"
+
+
+def sentences(state: State) -> str:
+    """For example ``Block 2 is on block 5. Block 5 is on the table. The hand is empty.``"""
+    out = []
+    for fact in sorted(state):
+        words = fact[1:-1].split()
+        if words[0] == "on":
+            out.append(f"{number(words[1]).capitalize()} is on {number(words[2])}.")
+        elif words[0] == "ontable":
+            out.append(f"{number(words[1]).capitalize()} is on the table.")
+        elif words[0] == "clear":
+            out.append(f"Nothing is on {number(words[1])}.")
+        elif words[0] == "holding":
+            out.append(f"The hand holds {number(words[1])}.")
+        else:
+            out.append("The hand is empty.")
+    return " ".join(out)
+
+
+def tower_words(state: State) -> str:
+    """For example ``a tower of b5, b2 (from the table up); a tower of b1; the hand is empty``."""
+    found, held = stacks(state)
+    parts = [f"a tower of {', '.join(tower)}" + (" (from the table up)" if len(tower) > 1 else "")
+             for tower in found]
+    parts.append(f"the hand holds {held}" if held else "the hand is empty")
+    return "; ".join(parts)
+
+
+def brackets(state: State) -> str:
+    """For example ``[b5 b2] [b1] hand: -``. Each tower goes from the table up."""
+    found, held = stacks(state)
+    return " ".join(f"[{' '.join(tower)}]" for tower in found) + f" hand: {held or '-'}"
+
+
+#: For each representation: how it writes a state, and the context of the model.
+REPRESENTATIONS = {
+    "facts": (facts, CONTEXT),
+    "sentences": (sentences, (
+        "A state is a list of sentences that are true. The hand can pick up a block from the "
+        "table when nothing is on it, put down the block it holds, stack the block it holds on "
+        "a block that has nothing on it, or unstack a block that has nothing on it from the "
+        "block under it. The hand holds one block at a time.")),
+    "towers": (tower_words, (
+        "A state lists the towers of blocks, each from the table up, and what the hand holds. "
+        "The hand can pick up the top block of a tower of one block, put down the block it "
+        "holds as a new tower, stack the block it holds on the top of a tower, or unstack the "
+        "top block of a tower. The hand holds one block at a time.")),
+    "brackets": (brackets, (
+        "A state lists the towers of blocks in brackets, each from the table up, and then the "
+        "block in the hand, or - for none. The hand can pick up a block that is alone in its "
+        "brackets, put down the block it holds in new brackets, stack the block it holds on "
+        "the top of a tower, or unstack the top block of a tower. The hand holds one block at "
+        "a time.")),
+}
+
+
+def represent(problem: Problem, name: str) -> Problem:
+    """``problem`` with the states and the goal in representation ``name``."""
+    from dataclasses import replace
+
+    render, context = REPRESENTATIONS[name]
+    goal = problem.solved.args[0]
+    if name == "facts":
+        objective = problem.objective
+    elif name == "sentences":
+        objective = ("reach a state where all of these sentences are true: "
+                     + sentences(goal))
+    else:
+        towers_of_goal = frozenset(goal | {"(handempty)"})
+        objective = "reach this state: " + render(towers_of_goal)
+    return replace(problem, render=render, context=context, objective=objective)

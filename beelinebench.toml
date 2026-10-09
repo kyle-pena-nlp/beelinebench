@@ -12,6 +12,24 @@ max_cost = 35.0                     # US dollars: the most one model may cost in
                                     # .spend/<chooser>.json holds each total. A chooser can
                                     # set its own max_cost.
 
+# The mini benchmark, `run --mini`: the first 20 trials of each domain of the benchmark,
+# with two fast models from one provider (Perplexity, one key). Trial n is the same trial
+# as in the full benchmark. A run costs about $4.
+[mini]
+trials = 20
+choosers = ["pplx-decider", "pplx-decider-1"]
+
+# The case study, `case-study`: one model on one problem, with each representation of
+# the states (with the random option order), and each option order (with the first
+# representation). Change `chooser` to study another model. The chooser has its own ledger,
+# .spend/<chooser>.case-study.json, under the same limits.
+[case_study]
+chooser = "pplx-decider"
+domain = "blocksworld"
+trials = 50
+representations = ["facts", "sentences", "towers", "brackets"]
+orders = ["random", "random-2", "random-3", "found", "newest-first", "best-first", "worst-first"]
+
 # A chooser:
 #
 # protocol          "jev": a choice model that answers like Jev, at POST {api_base}/{endpoint}.

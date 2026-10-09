@@ -45,9 +45,9 @@ from . import benchmark, config, publishing, readme
 from .benchmark import Benchmark
 from .domains import blocksworld, countdown, keys_doors, rush_hour, tiles, wikispeedia, word_ladder
 from .rng import Draws
-from .run import (Record, append, baseline, best, geometric_mean, measure, read, replace,
-                  results_file, shortest, summarise, takes_place, trace_file, troubles,
-                  wander)
+from .run import (Record, Tally, append, baseline, best, geometric_mean, measure, read,
+                  replace, results_file, shortest, summarise, takes_place, tally_trace,
+                  trace_file, troubles, wander)
 from .search import BudgetExhausted, ChooserError, Problem, Spend, Wallet, efficiency
 
 PROJECT = Path(__file__).resolve().parent.parent
@@ -152,7 +152,11 @@ def show_baseline(args: argparse.Namespace) -> None:
 
 def run(args: argparse.Namespace) -> None:
     officials, cfg, chosen, domains = setup(args)
-    names = [args.chooser] if args.chooser else list(cfg.run.choosers)
+    mini = cfg.mini if getattr(args, "mini", False) else None
+    if getattr(args, "mini", False) and mini is None:
+        raise SystemExit(f"--mini needs a [mini] table in {args.config}")
+    names = ([args.chooser] if args.chooser else list(mini.choosers) if mini
+             else list(cfg.run.choosers))
     for name in names:
         if name not in cfg.choosers:
             raise SystemExit(f"no chooser {name!r} in {args.config}. "
@@ -160,7 +164,8 @@ def run(args: argparse.Namespace) -> None:
     label = label_of(chosen, domains, officials)
     for name in names:
         chooser = cfg.choosers[name]
-        trials = args.trials or chooser.trials or cfg.run.trials or chosen.trials
+        trials = args.trials or (mini.trials if mini else chooser.trials or cfg.run.trials
+                                 or chosen.trials)
         finished = run_chooser(chooser, chosen, label, domains, trials,
                                max_requests=args.max_requests or chooser.max_requests,
                                max_input_tokens=args.max_input_tokens or chooser.max_input_tokens,
@@ -429,17 +434,34 @@ def make_plot(args: argparse.Namespace) -> None:
 
 
 def fill(args: argparse.Namespace) -> None:
-    """Add the random arm to records that do not have it. Sends no requests.
+    """Add the random arm, and the choices of each arm, to records without them.
 
-    Do not fill the files of a chooser while it runs: the run appends to them.
+    It sends no requests. The heuristic and random arms run again here. The choices of
+    the model arm come from the trace file of the trial, so a trial without a trace
+    gets no ``model`` choices. Do not fill the files of a chooser while it runs: the
+    run appends to them.
     """
     import dataclasses
+    import gzip
     import json
 
     officials = benchmark.load(OFFICIAL)
     cfg = config.load(args.config, officials)
     every = {**officials, **{f"custom-{name}": b for name, b in cfg.benchmarks.items()}}
     makers: dict = {}
+    references: dict = {}  # (label, domain, trial): the choices of the heuristic and random arms
+
+    def reference_choices(label, domain, rules, make, trial) -> dict:
+        key = (label, domain, trial)
+        if key not in references:
+            problem = make(trial)
+            distance = shortest(problem)
+            tallies = {"heuristic": Tally(distance), "random": Tally(distance)}
+            baseline(problem, rules, step=tallies["heuristic"])
+            wander(problem, rules, tallies["random"])
+            references[key] = {arm: t.result() for arm, t in tallies.items()}
+        return references[key]
+
     for path in sorted(RESULTS.glob("*/*/*.jsonl")):
         label, chooser = path.parent.parent.name, path.parent.name
         if args.chooser and chooser not in args.chooser:
@@ -449,7 +471,14 @@ def fill(args: argparse.Namespace) -> None:
             continue
         domain = path.stem.split(".")[0]
         records = read(path)
-        missing = [r for r in records if r.random_score is None]
+        traces = TRACES / label / chooser / path.stem
+
+        def lacks_model(r: Record) -> bool:
+            return ((r.choices is None or "model" not in r.choices)
+                    and (traces / f"{r.trial}.jsonl.gz").exists())
+
+        missing = [r for r in records if r.random_score is None or r.choices is None
+                   or lacks_model(r)]
         if not missing:
             continue
         rules = every[label]
@@ -462,11 +491,68 @@ def fill(args: argparse.Namespace) -> None:
                 aimless = wander(problem, rules)
                 r = dataclasses.replace(r, random_expansions=aimless.expansions,
                                         random_score=efficiency(d, aimless.expansions))
+            if r.choices is None or lacks_model(r):
+                choices = dict(r.choices or reference_choices(label, domain, rules, make,
+                                                              r.trial))
+                trace = traces / f"{r.trial}.jsonl.gz"
+                if trace.exists():
+                    with gzip.open(trace, "rt", encoding="utf-8") as lines:
+                        steps = [json.loads(line) for line in lines][1:]  # after the header
+                    choices["model"] = tally_trace(steps)
+                r = dataclasses.replace(r, choices=choices)
             filled.append(r)
         temporary = path.with_suffix(".jsonl.filling")
         temporary.write_text("".join(json.dumps(dataclasses.asdict(r)) + "\n" for r in filled))
         temporary.replace(path)
-        console.print(f"{path.relative_to(PROJECT)}: added the random arm to {len(missing)} trials")
+        console.print(f"{path.relative_to(PROJECT)}: filled {len(missing)} trials")
+
+
+def run_case_study(args: argparse.Namespace) -> None:
+    """Run each condition of the case study of the config. Spends money."""
+    import dataclasses
+    import importlib
+
+    from . import case_study
+
+    officials = benchmark.load(OFFICIAL)
+    cfg = config.load(args.config, officials)
+    study = cfg.case_study
+    if study is None:
+        raise SystemExit(f"{args.config} has no [case_study] table")
+    rules = officials[cfg.run.benchmark]
+    chooser = cfg.choosers[study.chooser]
+    represent = getattr(importlib.import_module(f".domains.{study.domain}", __package__),
+                        "represent", None)
+    if represent is None:
+        raise SystemExit(f"{study.domain} has no other representations")
+    ledger = dataclasses.replace(chooser, name=f"{chooser.name}.{case_study.LABEL}")
+    max_cost = chooser.max_cost or cfg.run.max_cost
+    spend = Spend(max_requests=chooser.max_requests, max_input_tokens=chooser.max_input_tokens,
+                  wallet=wallet_of(ledger, max_cost, cfg.run.max_total_cost))
+    make_chooser = config.factory(chooser, PROJECT / ".env")
+    make = maker(study.domain, rules.domains[study.domain])
+    folder = case_study.results_dir(RESULTS, study)
+    for name, representation, order in case_study.conditions(study):
+        path = folder / f"{name}.jsonl"
+        done = {r.trial for r in read(path)}
+        for trial in range(1, study.trials + 1):
+            if trial in done:
+                continue
+            shown, arrange = case_study.prepared(make(trial), representation, order,
+                                                 chooser.model, represent)
+            choose = make_chooser(shown, spend, arrange)
+            trace = (TRACES / case_study.LABEL / chooser.name / study.domain / name
+                     / f"{trial}.jsonl.gz")
+            try:
+                record = measure(shown, rules=rules, label=case_study.LABEL, choose=choose,
+                                 chooser=chooser.name, model=chooser.model, spend=spend,
+                                 trace=trace)
+            except (BudgetExhausted, ChooserError) as error:
+                raise SystemExit(f"{name} trial {trial} is not recorded: {error}")
+            append(path, record)
+            console.print(f"{name} trial {trial}: score {record.score:.3f} · heuristic "
+                          f"{record.baseline_score:.3f} · {record.requests} requests")
+    console.print(f"the case study is complete: {folder.relative_to(PROJECT)}")
 
 
 def check_docs(args: argparse.Namespace) -> None:
@@ -501,6 +587,8 @@ def figure_is_current(kind: str, png: Path, b: Benchmark, labels, hidden, prices
 
     if kind == "frontier_figure":
         return plot.is_current(png, b, RESULTS, labels, hidden, prices, kind="frontier")
+    if kind == "choices_figure":
+        return plot.is_current(png, b, RESULTS, labels, hidden, kind="choices")
     return plot.is_current(png, b, RESULTS, labels, hidden)
 
 
@@ -509,6 +597,8 @@ def draw_figure(kind: str, png: Path, b: Benchmark, labels, hidden, prices) -> N
 
     if kind == "frontier_figure":
         plot.draw_frontier(b, RESULTS, png, labels, hidden, prices)
+    elif kind == "choices_figure":
+        plot.draw_choices(b, RESULTS, png, labels, hidden)
     else:
         plot.draw(b, RESULTS, png, labels, hidden)
 
@@ -517,20 +607,21 @@ def make_readme(args: argparse.Namespace) -> None:
     from . import plot
 
     template = PROJECT / readme.TEMPLATE
-    target = PROJECT / readme.OUTPUT
     officials = benchmark.load(OFFICIAL)
-    choosers = config.load(args.config, officials).choosers
+    cfg = config.load(args.config, officials)
+    choosers = cfg.choosers
     labels = {c.name: c.title for c in choosers.values()}
     hidden = config.unpublished(choosers)
     prices = price_list(choosers)
     try:
-        text = readme.render(template.read_text(), officials, RESULTS, choosers)
+        built = {PROJECT / out: readme.render((PROJECT / source).read_text(), officials, RESULTS,
+                                              choosers, source, cfg.mini, cfg.case_study)
+                 for source, out in readme.pages(officials)}
         # The index of the benchmarks shows both figures of every version.
         figures = sorted(set(readme.figures(template.read_text(), officials))
                          | {(kind, name) for kind in readme.FIGURES for name in officials})
     except ValueError as error:
         raise SystemExit(f"{template.name}: {error}")
-    current = target.read_text() if target.exists() else ""
     index_path, index_text = DOCS / publishing.INDEX, publishing.index(officials)
     # The page of each benchmark shows its figures, and their data as tables.
     pages = {}
@@ -538,8 +629,62 @@ def make_readme(args: argparse.Namespace) -> None:
         page = DOCS / publishing.page_name(name)
         if page.exists():
             section = readme.results_section(b, RESULTS, labels, hidden, prices)
+            notes = readme.commentary(name, officials, RESULTS, choosers, cfg.mini)
+            if notes:
+                section = f"## Commentary\n\n{notes}\n\n{section}"
             pages[page] = publishing.with_results(page.read_text(), section)
+    # The mini benchmark: its figures and its index, in docs/benchmarks/mini/.
+    minis, mini_path, mini_text = [], DOCS / publishing.MINI / publishing.INDEX, None
+    if cfg.mini is not None:
+        scope = dict(trials=cfg.mini.trials, only=set(cfg.mini.choosers))
+        sections = {name: readme.results_section(b, RESULTS, labels, hidden, prices, **scope)
+                    for name, b in officials.items()}
+        mini_text = publishing.mini_index(
+            officials, cfg.mini.trials, [labels.get(c, c) for c in cfg.mini.choosers], sections)
+        for name, b in officials.items():
+            if plot.rows(b, RESULTS, labels, hidden, prices, **scope):
+                minis += [("scores", b, mini_path.parent / f"{name}.png", scope),
+                          ("frontier", b, mini_path.parent / f"{name}-frontier.png", scope)]
+            if plot.choice_rows(b, RESULTS, labels, hidden, **scope):
+                minis.append(("choices", b, mini_path.parent / f"{name}-choices.png", scope))
+
+    # The case study figure.
+    study_png, study_args = None, None
+    if cfg.case_study is not None:
+        from . import case_study as study_module
+        latest = officials[list(officials)[-1]]
+        if any(study_module.results_dir(RESULTS, cfg.case_study).glob("*.jsonl")):
+            study_png = PROJECT / readme.CASE_STUDY_FIGURE.format(latest.name)
+            study_args = (cfg.case_study, RESULTS, latest, labels.get(cfg.case_study.chooser,
+                                                                      cfg.case_study.chooser))
+
+    def study_is_current() -> bool:
+        return study_png is None or plot.stored_fingerprint(study_png) == \
+            plot.case_study_fingerprint(*study_args)
+
+    def mini_is_current(kind, b, png, scope) -> bool:
+        return plot.is_current(png, b, RESULTS, labels, hidden,
+                               prices if kind == "frontier" else {}, kind, **scope)
+
     if not args.check:
+        if not study_is_current():
+            plot.draw_case_study(study_args[0], study_args[1], study_png, study_args[2],
+                                 study_args[3])
+            console.print(f"wrote {study_png.relative_to(PROJECT)}")
+        for kind, b, png, scope in minis:
+            if mini_is_current(kind, b, png, scope):
+                continue
+            png.parent.mkdir(parents=True, exist_ok=True)
+            if kind == "frontier":
+                plot.draw_frontier(b, RESULTS, png, labels, hidden, prices, **scope)
+            elif kind == "choices":
+                plot.draw_choices(b, RESULTS, png, labels, hidden, **scope)
+            else:
+                plot.draw(b, RESULTS, png, labels, hidden, **scope)
+            console.print(f"wrote {png.relative_to(PROJECT)}")
+        if mini_text is not None and (not mini_path.exists() or mini_path.read_text() != mini_text):
+            mini_path.write_text(mini_text)
+            console.print(f"wrote {mini_path.relative_to(PROJECT)}")
         for kind, name in figures:
             png = PROJECT / readme.FIGURES[kind].format(name)
             if figure_is_current(kind, png, officials[name], labels, hidden, prices):
@@ -557,9 +702,11 @@ def make_readme(args: argparse.Namespace) -> None:
             if page.read_text() != page_text:
                 page.write_text(page_text)
                 console.print(f"wrote {page.relative_to(PROJECT)}")
-        target.write_text(text)
-        console.print(f"wrote {target.name}" if text != current
-                      else f"{target.name} is already up to date")
+        for target, text in built.items():
+            current = target.read_text() if target.exists() else ""
+            target.write_text(text)
+            console.print(f"wrote {target.relative_to(PROJECT)}" if text != current
+                          else f"{target.relative_to(PROJECT)} is already up to date")
         return
     old = [readme.FIGURES[kind].format(name) for kind, name in figures
            if not figure_is_current(kind, PROJECT / readme.FIGURES[kind].format(name),
@@ -569,20 +716,29 @@ def make_readme(args: argparse.Namespace) -> None:
                          "Run `python -m beelinebench readme`, and commit the figure.")
     stale = [str(page.relative_to(PROJECT)) for page, page_text in pages.items()
              if page.read_text() != page_text]
+    stale += [str(png.relative_to(PROJECT)) for kind, b, png, scope in minis
+              if not mini_is_current(kind, b, png, scope)]
+    if not study_is_current():
+        stale.append(str(study_png.relative_to(PROJECT)))
+    if mini_text is not None and (not mini_path.exists() or mini_path.read_text() != mini_text):
+        stale.append(str(mini_path.relative_to(PROJECT)))
     if stale:
         raise SystemExit(f"{', '.join(stale)} does not show the current results. "
                          "Run `python -m beelinebench readme`, and commit it.")
     if not index_path.exists() or index_path.read_text() != index_text:
         raise SystemExit(f"{index_path.relative_to(PROJECT)} is out of date. "
                          "Run `python -m beelinebench readme`, and commit it.")
-    if text != current:
-        diff = difflib.unified_diff(current.splitlines(keepends=True),
-                                    text.splitlines(keepends=True),
-                                    f"{target.name} (committed)", f"{target.name} (made)")
-        console.print("".join(diff), markup=False, highlight=False)
-        raise SystemExit(f"{target.name} is not what {template.name} and the results make. "
-                         "Run `python -m beelinebench readme`, and commit README.md.")
-    console.print(f"{target.name} is up to date")
+    for target, text in built.items():
+        current = target.read_text() if target.exists() else ""
+        if text != current:
+            name = target.relative_to(PROJECT)
+            diff = difflib.unified_diff(current.splitlines(keepends=True),
+                                        text.splitlines(keepends=True),
+                                        f"{name} (committed)", f"{name} (made)")
+            console.print("".join(diff), markup=False, highlight=False)
+            raise SystemExit(f"{name} is not what its template and the results make. "
+                             f"Run `python -m beelinebench readme`, and commit {name}.")
+    console.print("the README and the pages are up to date")
 
 
 def download(args: argparse.Namespace) -> None:
@@ -631,6 +787,9 @@ def main() -> None:
                                  help="run again each trial with refusals, invalid answers or "
                                  "retries. The new run takes the place of the old one only if "
                                  "it has fewer of them, whatever its score")
+            command.add_argument("--mini", action="store_true",
+                                 help="the mini benchmark: the first trials of each domain, "
+                                 "with the choosers of the [mini] table of the config")
             command.add_argument("--retrace", action="store_true",
                                  help="run again each trial that has a result and no trace, "
                                  "and put its new result in place of the old one")
@@ -643,6 +802,10 @@ def main() -> None:
                                   "chooser. Spends one or two requests.")
     command.set_defaults(handler=probe)
     command.add_argument("--chooser", required=True)
+    command = commands.add_parser("case-study", help="run the case study of the config: one "
+                                  "model on one problem, with each representation and option "
+                                  "order. Spends money.")
+    command.set_defaults(handler=run_case_study)
     command = commands.add_parser("fill", help="add missing reference arms to old results. "
                                   "Sends nothing. Do not use it on a chooser that runs.")
     command.set_defaults(handler=fill)

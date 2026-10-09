@@ -60,6 +60,10 @@ def index(officials: dict[str, Benchmark]) -> str:
     scores = "\n\n".join(
         f"### Benchmark {name}\n\n![The scores of each model and heuristic in benchmark "
         f"{name}, by domain, with 95% intervals]({name}.png)" for name in newest)
+    choices = "\n\n".join(
+        f"### Benchmark {name}\n\n![The share of decisions that matched the oracle for each model "
+        f"and heuristic in benchmark {name}, by domain, with 95% intervals]({name}-choices.png)"
+        for name in newest)
     frontiers = "\n\n".join(
         f"### Benchmark {name}\n\n![The score against the cost of a step for each model in "
         f"benchmark {name}, by domain, with the efficient frontier]({name}-frontier.png)"
@@ -81,6 +85,35 @@ file is out of date.
 ## Score and cost
 
 {frontiers}
+
+## Choices against the oracle
+
+{choices}
+"""
+
+
+#: The folder of the mini benchmark in ``docs/benchmarks``: its index and figures.
+MINI = "mini"
+
+
+def mini_index(officials: dict[str, Benchmark], trials: int, models: list[str],
+               sections: dict[str, str]) -> str:
+    """The index of the mini results: for each version, newest first, its results part.
+
+    ``models`` are the names of the mini choosers for a reader, and ``sections`` the
+    results part of each version, from ``readme.results_section``.
+    """
+    parts = "\n\n".join(sections[name].replace("## Results", f"## Benchmark {name} mini", 1)
+                          .rstrip() for name in list(officials)[::-1] if name in sections)
+    return f"""{INDEX_HEADER}# The mini benchmarks
+
+The mini benchmark of a version is its first {trials} trials of each domain, with
+{", ".join(models)}. These models come from one provider, so a run needs one key.
+`uv run python -m beelinebench run --mini` runs it. Trial n is the same trial as in the
+full benchmark, so a mini score is the full score of fewer trials, with wider intervals.
+[The benchmarks](../{INDEX}) has the full results.
+
+{parts}
 """
 
 
