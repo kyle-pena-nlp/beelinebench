@@ -99,8 +99,13 @@ def test_a_price_estimate_uses_measured_tokens_or_borrows_them(tmp_path):
     choosers = {"a": chooser("a", 2.0), "b": chooser("b", 4.0), "local": chooser("local", None),
                 "c": chooser("c", 1.0, 5.0, protocol="anthropic")}
     table = readme.costs_table(one, tmp_path, choosers)
-    # 6 domains x 100 trials x 100 tokens = 60,000 tokens
-    assert "| A | $2.00 input, output free | 60 thousand | $0.12 | measured on 6 trials |" in table
-    assert "| B | $4.00 input, output free | 60 thousand | $0.24 | token counts of A |" in table
+    # 7 domains x 100 trials x 100 tokens = 70,000 tokens
+    assert "| A | $2.00 input, output free | 70 thousand | $0.14 | measured on 7 trials |" in table
+    assert "| B | $4.00 input, output free | 70 thousand | $0.28 | token counts of A |" in table
     assert "| C | $1.00 input, $5.00 output | — | — | no results to estimate from |" in table
     assert "LOCAL" not in table
+
+
+def test_the_latest_benchmark_link_points_to_its_page(tmp_path):
+    text = readme.render("{{ latest_benchmark_link }}", OFFICIALS, tmp_path)
+    assert text.endswith("[1.0.0](docs/benchmarks/1.0.0.md)")

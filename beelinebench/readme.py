@@ -164,6 +164,71 @@ def price(c: ChooserConfig) -> str:
     return f"{dollars(c.price_input)} input, {out}"
 
 
+#: The page of a benchmark, from the project root.
+PAGE = "docs/benchmarks/{}.md"
+
+
+def interval_text(row) -> str:
+    from .plot import score_text
+    return f"{score_text(row.low)} to {score_text(row.high)}"
+
+
+def results_section(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
+                    hidden: Collection[str] = (), prices: Mapping = {}) -> str:
+    """The results part of the page of ``b``: both figures, and their data as tables.
+
+    The tables hold the rows of the figures, in the same order, so a reader without the
+    images gets the same facts.
+    """
+    from .plot import convex_frontier, rows, score_text
+
+    groups = rows(b, results, labels, hidden, prices)
+    if not groups:
+        return ("## Results\n\nNo results yet. Run it with:\n\n```bash\n"
+                f"uv run python -m beelinebench run --benchmark {b.name}\n"
+                "uv run python -m beelinebench readme\n```\n")
+    limit = f"{b.max_expansions:,}"
+    out = [f"## Results\n\n![The scores of each model and heuristic in benchmark {b.name}, by "
+           f"domain, with 95% intervals]({b.name}.png)\n\n### Scores as text\n\n"
+           "The rows of each problem are in the order of the figure, best first. A score is the "
+           "geometric mean over the trials, and the interval is its 95% bootstrap interval. "
+           f"\\* or †: at least one model (\\*) or heuristic (†) run did not solve within "
+           f"{limit} nodes, so the true score is lower.\n"]
+    for title, group in groups:
+        lines = [f"#### {title}\n", "| | trials | score | 95% interval |", "|---|---|---|---|"]
+        lines += [f"| {row.label} | {row.trials} | {score_text(row.score)}"
+                  f"{row.marks.replace('*', chr(92) + '*')} | {interval_text(row)} |"
+                  for row in group]
+        out.append("\n".join(lines) + "\n")
+    priced = [(title, [r for r in group if r.cost_per_step and not r.reference])
+              for title, group in groups]
+    priced = [(title, models) for title, models in priced if models]
+    if priced:
+        out.append(f"![The score against the cost of a step for each model in benchmark "
+                   f"{b.name}, by domain, with the efficient frontier]({b.name}-frontier.png)"
+                   "\n\n### Score and cost as text\n\n"
+                   "A step is one request. Its cost is the mean tokens of a request at the list "
+                   "price of the model. A model on the frontier is on the line of the figure: no "
+                   "other model, and no mix of two models, is both cheaper and better. The rows "
+                   "are best score first.\n")
+        for title, models in priced:
+            efficient = {r.label for r in convex_frontier(models)}
+            lines = [f"#### {title}\n",
+                     "| model | score | US dollars for 1,000 steps | on the frontier |",
+                     "|---|---|---|---|"]
+            lines += [f"| {r.label} | {score_text(r.score)}{r.marks.replace('*', chr(92) + '*')} "
+                      f"| {dollars_per_thousand(r.cost_per_step * 1000)} | "
+                      f"{'yes' if r.label in efficient else ''} |"
+                      for r in sorted(models, key=lambda r: -r.score)]
+            out.append("\n".join(lines) + "\n")
+    return "\n".join(out)
+
+
+def dollars_per_thousand(value: float) -> str:
+    """Two significant digits, for example $0.042 or $1.3."""
+    return f"${value:#.2g}" if value < 10 else f"${value:,.0f}"
+
+
 def placeholders(officials: dict[str, Benchmark], results: Path,
                  choosers: Mapping[str, ChooserConfig] | None = None
                  ) -> dict[str, Callable[[str | None], str]]:
@@ -179,6 +244,8 @@ def placeholders(officials: dict[str, Benchmark], results: Path,
 
     return {
         "latest_benchmark": lambda argument: latest,
+        "latest_benchmark_link": lambda argument: (
+            f"[{official(argument).name}]({PAGE.format(official(argument).name)})"),
         "results": lambda argument: results_table(official(argument), results, hidden),
         "results_figure": lambda argument: (
             f"![The scores of each model and heuristic in benchmark {official(argument).name}, "

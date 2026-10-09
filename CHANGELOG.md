@@ -16,9 +16,10 @@ table is changed.
   this score. The path score is the shortest path divided by the model's path.
 * Both arms stop at 2,500 explorations, solved or not. A model run that stops
   unsolved is marked `*`, and a classic run `†`. No trial is skipped.
-* 100 trials of six domains, each with one heuristic: `tiles/manhattan`,
+* 100 trials of seven domains, each with one heuristic: `tiles/manhattan`,
   `blocksworld/h_ff`, `countdown/nearest_number`, `word_ladder/letters_different`,
-  `wikispeedia/category_distance`, `rush_hour/blocking_cars`.
+  `wikispeedia/category_distance`, `rush_hour/blocking_cars`,
+  `keys_doors/locked_doors`.
 
 ## Code 1.0.0
 

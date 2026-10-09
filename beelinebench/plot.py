@@ -45,7 +45,7 @@ TICKS = (0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0)
 
 #: The look of the figures. A change of the look changes this number, so that
 #: ``readme`` draws the figures again.
-STYLE = 25
+STYLE = 27
 
 #: The PNG text key that holds the fingerprint of the rows.
 FINGERPRINT_KEY = "beelinebench-rows"
@@ -130,7 +130,7 @@ def rows(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
 
 def score_text(score: float) -> str:
     """Two decimals, or two significant digits for a score below 0.01, for example 0.0041."""
-    return f"{score:.2f}" if score >= 0.01 else f"{score:.2g}"
+    return f"{score:.2f}" if score >= 0.01 else f"{score:#.2g}"
 
 
 def fingerprint(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
@@ -175,6 +175,19 @@ def is_current(png: Path, b: Benchmark, results: Path, labels: Mapping[str, str]
     return stored_fingerprint(png) == fingerprint(b, results, labels, hidden, prices, kind)
 
 
+#: The height in inches above the plot for the title and its subtitle.
+TITLE_SPACE = 0.6
+
+
+def titled(fig, title: str, subtitle: str) -> float:
+    """Write the title of the figure at its top. Gives the top of the space for the plot."""
+    height = fig.get_figheight()
+    fig.text(0.01, 1 - 0.12 / height, title, color=TEXT, fontsize=14, fontweight="bold",
+             va="top")
+    fig.text(0.01, 1 - 0.38 / height, subtitle, color=MUTED, fontsize=9.5, va="top")
+    return 1 - TITLE_SPACE / height
+
+
 def draw(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
          hidden: Collection[str] = ()) -> None:
     import matplotlib
@@ -200,7 +213,10 @@ def draw(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
     height = y - 0.6
 
     plt.rcParams.update({"font.size": 10, "font.family": "sans-serif"})
-    fig, ax = plt.subplots(figsize=(8.5, 0.27 * height + 1.3), facecolor=SURFACE)
+    fig, ax = plt.subplots(figsize=(8.5, 0.27 * height + 1.3 + TITLE_SPACE), facecolor=SURFACE)
+    top = titled(fig, f"BeelineBench {b.name}: how efficiently each model searches",
+                 "The score of each model, heuristic and random choice, by problem. "
+                 "Higher is better, and 1.0 is a perfect search.")
     ax.set_facecolor(SURFACE)
     ax.set_xscale("log")
     lowest = min(row.low for _, row in placed)
@@ -244,7 +260,7 @@ def draw(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
     if "*" in marks or "†" in marks:
         notes += (f"\n* or †: at least one model (*) or heuristic (†) run did not solve within "
                   f"{b.max_expansions:,} nodes, so the true score is lower.")
-    fig.tight_layout(rect=(0, 0.02 + 0.016 * (notes.count("\n") + 1), 1, 1))
+    fig.tight_layout(rect=(0, 0.02 + 0.016 * (notes.count("\n") + 1), 1, top))
     fig.text(0.01, 0.008, notes, color=MUTED, fontsize=8, va="bottom")
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=200, facecolor=SURFACE,
@@ -319,8 +335,11 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
     plt.rcParams.update({"font.size": 9, "font.family": "sans-serif"})
     columns = 2
     panels = (len(groups) + columns - 1) // columns
-    fig, axes = plt.subplots(panels, columns, figsize=(9, 3.8 * panels), facecolor=SURFACE,
+    fig, axes = plt.subplots(panels, columns, figsize=(9, 3.8 * panels + TITLE_SPACE), facecolor=SURFACE,
                              sharex=True, sharey=True, squeeze=False)
+    top = titled(fig, f"BeelineBench {b.name}: score and cost",
+                 "The score of each model against its cost per 1,000 steps, by problem. "
+                 "Upper right is better. The line is the efficient frontier.")
     cells = list(axes.flat)
     names = sorted({r.label for r in points})
     marks = {name: MODEL_MARKS[n % len(MODEL_MARKS)] for n, name in enumerate(names)}
@@ -387,7 +406,7 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
     if any("*" in row.marks for row in points):
         notes += (f" *: at least one run did not solve within {b.max_expansions:,} nodes, so the "
                   "true score is lower.")
-    fig.tight_layout(rect=(0, 0.035, 1, 1))
+    fig.tight_layout(rect=(0, 0.035, 1, top))
     fig.text(0.01, 0.006, notes, color=MUTED, fontsize=8, va="bottom")
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=200, facecolor=SURFACE, metadata={

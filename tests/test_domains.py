@@ -51,3 +51,19 @@ def test_word_ladder(tmp_path):
     assert ladder["cold"] == ("cord",)
     assert word_ladder.steps_from(ladder, "cold")["warm"] == 4
     assert word_ladder.letters_different("warm", "cold") == 4
+
+
+def test_keys_doors():
+    from beelinebench.domains import keys_doors as kd
+
+    # start holds the red key and the red door; the exit is behind the blue door,
+    # in the red room, and the blue key is behind the red door.
+    layout = kd.Layout(doors=("red", "blue"), parent={"red": kd.START, "blue": "red"},
+                       key_room={"red": kd.START, "blue": "red"}, exit="blue")
+    start = (kd.START, frozenset({kd.START}))
+    assert list(kd.moves(layout, start)) == [("red", frozenset({kd.START, "red"}))]
+    assert kd.locked_doors(layout, start) == 3  # two closed doors, the blue key missing
+    assert kd.describe(layout, start) == "in the starting room · keys: red · open doors: none"
+    problem = kd.problem(1, heuristic="locked_doors", doors=10, min_moves=12)
+    assert not problem.solved(problem.start) and problem.heuristic(problem.start) > 0
+    assert "The exit is behind the" in problem.context

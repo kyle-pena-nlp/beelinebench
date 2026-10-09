@@ -3,8 +3,12 @@
 Each official benchmark of ``benchmarks.toml`` has a page,
 ``docs/benchmarks/<name>.md``, and the index ``docs/benchmarks/README.md`` links
 to it. :func:`problems` lists what is missing. :func:`publish` writes the page of
-a benchmark from its definition, and adds the link to the index. It never writes
-over a page that exists.
+a benchmark from its definition, and writes the index again. It never writes over a
+page that exists.
+
+:func:`index` makes the index from ``benchmarks.toml``: a table of the versions, and
+the two figures of each version. ``python -m beelinebench readme`` writes it, and
+``readme --check`` fails when it is out of date.
 """
 
 from __future__ import annotations
@@ -15,21 +19,69 @@ from .benchmark import Benchmark
 
 INDEX = "README.md"
 
-INDEX_TEXT = """# The benchmarks
-
-Each official benchmark of `benchmarks.toml` has a page here. A new version adds
-a page, and no page is removed. CI fails when a benchmark has no page, or when
-this list has no link to it.
-
-"""
+INDEX_HEADER = ("<!-- Made by `python -m beelinebench readme` from benchmarks.toml. "
+                "Do not edit. -->\n")
 
 
 def page_name(name: str) -> str:
     return f"{name}.md"
 
 
-def link(name: str) -> str:
-    return f"- [Benchmark {name}]({page_name(name)})"
+#: The results part of a page sits between these lines. ``readme`` writes it again.
+RESULTS_START = ("<!-- Results: made by `python -m beelinebench readme`. Do not edit between "
+                 "these lines. -->")
+RESULTS_END = "<!-- End of results. -->"
+
+
+def with_results(page_text: str, section: str) -> str:
+    """``page_text`` with ``section`` as its results part.
+
+    The part between the markers is replaced. A page without the markers gets them in
+    place of its ``## Results`` section, or at its end.
+    """
+    block = f"{RESULTS_START}\n\n{section.rstrip()}\n\n{RESULTS_END}\n"
+    if RESULTS_START in page_text and RESULTS_END in page_text:
+        head, rest = page_text.split(RESULTS_START, 1)
+        tail = rest.split(RESULTS_END, 1)[1].lstrip("\n")
+        return head + block + ("\n" + tail if tail else "")
+    if "\n## Results\n" in page_text:
+        head = page_text.split("\n## Results\n", 1)[0]
+        return head.rstrip("\n") + "\n\n" + block
+    return page_text.rstrip("\n") + "\n\n" + block
+
+
+def index(officials: dict[str, Benchmark]) -> str:
+    """The index of all official benchmarks, newest first, with their figures."""
+    newest = list(officials)[::-1]
+    rows = "\n".join(
+        f"| [{name}]({page_name(name)}) | {len(b.domains)} | {b.trials} | "
+        f"{b.max_expansions:,} | {b.max_frontier} |"
+        for name, b in ((n, officials[n]) for n in newest))
+    scores = "\n\n".join(
+        f"### Benchmark {name}\n\n![The scores of each model and heuristic in benchmark "
+        f"{name}, by domain, with 95% intervals]({name}.png)" for name in newest)
+    frontiers = "\n\n".join(
+        f"### Benchmark {name}\n\n![The score against the cost of a step for each model in "
+        f"benchmark {name}, by domain, with the efficient frontier]({name}-frontier.png)"
+        for name in newest)
+    return f"""{INDEX_HEADER}# The benchmarks
+
+Each official benchmark of `benchmarks.toml` has a page here. A new version adds a
+page, and no page is removed. CI fails when a benchmark has no page, or when this
+file is out of date.
+
+| benchmark | domains | trials for each domain | node limit | frontier limit |
+|---|---|---|---|---|
+{rows}
+
+## Scores
+
+{scores}
+
+## Score and cost
+
+{frontiers}
+"""
 
 
 def problems(officials: dict[str, Benchmark], docs: Path) -> list[str]:
@@ -75,28 +127,31 @@ page shows it.
 
 Write what this version changes, and why.
 
+{RESULTS_START}
+
 ## Results
 
 No results yet. Run it with:
 
 ```bash
 uv run python -m beelinebench run --benchmark {b.name}
-uv run python -m beelinebench report
+uv run python -m beelinebench readme
 ```
+
+{RESULTS_END}
 """
 
 
-def publish(b: Benchmark, docs: Path) -> list[Path]:
-    """Write the page of ``b`` and its link in the index, where they are missing."""
+def publish(b: Benchmark, docs: Path, officials: dict[str, Benchmark]) -> list[Path]:
+    """Write the page of ``b`` where it is missing, and the index of ``officials``."""
     written = []
     docs.mkdir(parents=True, exist_ok=True)
     target = docs / page_name(b.name)
     if not target.exists():
         target.write_text(page(b))
         written.append(target)
-    index = docs / INDEX
-    text = index.read_text() if index.exists() else INDEX_TEXT
-    if f"]({page_name(b.name)})" not in text:
-        index.write_text((text if text.endswith("\n") else text + "\n") + link(b.name) + "\n")
-        written.append(index)
+    target, text = docs / INDEX, index(officials)
+    if not target.exists() or target.read_text() != text:
+        target.write_text(text)
+        written.append(target)
     return written

@@ -43,7 +43,7 @@ from rich.table import Table
 
 from . import benchmark, config, publishing, readme
 from .benchmark import Benchmark
-from .domains import blocksworld, countdown, rush_hour, tiles, wikispeedia, word_ladder
+from .domains import blocksworld, countdown, keys_doors, rush_hour, tiles, wikispeedia, word_ladder
 from .rng import Draws
 from .run import (Record, append, baseline, best, geometric_mean, measure, read, replace,
                   results_file, shortest, summarise, takes_place, trace_file, troubles,
@@ -72,7 +72,8 @@ def maker(domain: str, settings: dict[str, Any]) -> Callable[[int], Problem]:
         ladder = word_ladder.load(PROJECT / word_ladder.DATA)
         return lambda trial: word_ladder.problem(trial, ladder, **settings)
     problem = {"tiles": tiles.problem, "blocksworld": blocksworld.problem,
-               "countdown": countdown.problem, "rush_hour": rush_hour.problem}[domain]
+               "countdown": countdown.problem, "rush_hour": rush_hour.problem,
+               "keys_doors": keys_doors.problem}[domain]
     # A trial can take seconds to make (Rush Hour rejects easy boards), so keep each one.
     return functools.cache(lambda trial: problem(trial, **settings))
 
@@ -483,7 +484,7 @@ def publish(args: argparse.Namespace) -> None:
     officials = benchmark.load(OFFICIAL)
     if args.version not in officials:
         raise SystemExit(f"{args.version} is not in {OFFICIAL.name}. Add its table first.")
-    written = publishing.publish(officials[args.version], DOCS)
+    written = publishing.publish(officials[args.version], DOCS, officials)
     for path in written:
         console.print(f"wrote {path.relative_to(PROJECT)}")
     if not written:
@@ -524,10 +525,20 @@ def make_readme(args: argparse.Namespace) -> None:
     prices = price_list(choosers)
     try:
         text = readme.render(template.read_text(), officials, RESULTS, choosers)
-        figures = readme.figures(template.read_text(), officials)
+        # The index of the benchmarks shows both figures of every version.
+        figures = sorted(set(readme.figures(template.read_text(), officials))
+                         | {(kind, name) for kind in readme.FIGURES for name in officials})
     except ValueError as error:
         raise SystemExit(f"{template.name}: {error}")
     current = target.read_text() if target.exists() else ""
+    index_path, index_text = DOCS / publishing.INDEX, publishing.index(officials)
+    # The page of each benchmark shows its figures, and their data as tables.
+    pages = {}
+    for name, b in officials.items():
+        page = DOCS / publishing.page_name(name)
+        if page.exists():
+            section = readme.results_section(b, RESULTS, labels, hidden, prices)
+            pages[page] = publishing.with_results(page.read_text(), section)
     if not args.check:
         for kind, name in figures:
             png = PROJECT / readme.FIGURES[kind].format(name)
@@ -539,6 +550,13 @@ def make_readme(args: argparse.Namespace) -> None:
                 raise SystemExit("the README shows a figure, and drawing it needs matplotlib. "
                                  "Run `uv sync --extra plot`.")
             console.print(f"wrote {png.relative_to(PROJECT)}")
+        if not index_path.exists() or index_path.read_text() != index_text:
+            index_path.write_text(index_text)
+            console.print(f"wrote {index_path.relative_to(PROJECT)}")
+        for page, page_text in pages.items():
+            if page.read_text() != page_text:
+                page.write_text(page_text)
+                console.print(f"wrote {page.relative_to(PROJECT)}")
         target.write_text(text)
         console.print(f"wrote {target.name}" if text != current
                       else f"{target.name} is already up to date")
@@ -549,6 +567,14 @@ def make_readme(args: argparse.Namespace) -> None:
     if old:
         raise SystemExit(f"{', '.join(old)} does not show the current results. "
                          "Run `python -m beelinebench readme`, and commit the figure.")
+    stale = [str(page.relative_to(PROJECT)) for page, page_text in pages.items()
+             if page.read_text() != page_text]
+    if stale:
+        raise SystemExit(f"{', '.join(stale)} does not show the current results. "
+                         "Run `python -m beelinebench readme`, and commit it.")
+    if not index_path.exists() or index_path.read_text() != index_text:
+        raise SystemExit(f"{index_path.relative_to(PROJECT)} is out of date. "
+                         "Run `python -m beelinebench readme`, and commit it.")
     if text != current:
         diff = difflib.unified_diff(current.splitlines(keepends=True),
                                     text.splitlines(keepends=True),

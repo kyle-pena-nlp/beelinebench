@@ -41,3 +41,8 @@ min_clicks = 3
 heuristic = "blocking_cars"
 vehicles = 10
 min_moves = 6
+
+[benchmark."1.0.0".domains.keys_doors]
+heuristic = "locked_doors"
+doors = 10
+min_moves = 12

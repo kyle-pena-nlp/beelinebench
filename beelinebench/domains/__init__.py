@@ -8,6 +8,7 @@ TITLES = {
     "word_ladder": "Word ladder",
     "wikispeedia": "Wikispeedia",
     "rush_hour": "Rush Hour",
+    "keys_doors": "Keys and doors",
 }
 
 #: The name of each heuristic, for a reader.
@@ -18,4 +19,5 @@ HEURISTIC_TITLES = {
     "letters_different": "letters different",
     "category_distance": "category distance",
     "blocking_cars": "blocking vehicles",
+    "locked_doors": "locked doors",
 }
