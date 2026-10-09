@@ -140,6 +140,9 @@ class Spend:
     served: list[str] = field(default_factory=list)
     #: The total cost of the model over all runs, and its limit. ``None`` for no limit.
     wallet: Wallet | None = None
+    #: The model's probability for each frontier state, in frontier order, from the last
+    #: decision. ``None`` when the chooser gets no probabilities. A trace records it.
+    probabilities: list[float] | None = None
 
     def add(self, *, input_tokens: int, output_tokens: int, seconds: float,
             served: str) -> None:
@@ -169,7 +172,8 @@ class Outcome:
 def best_first(*, start: Hashable, moves: Callable[[Any], Iterable[Hashable]],
                solved: Callable[[Any], bool], choose: Chooser,
                max_expansions: int, max_frontier: int, evict: Draws,
-               observe: Callable[[int, int], None] | None = None) -> Outcome:
+               observe: Callable[[int, int], None] | None = None,
+               step: Callable[[list, int, Any, bool], None] | None = None) -> Outcome:
     """Explore the state that ``choose`` picks, until a state is solved.
 
     The search tests a state when it takes the state off the frontier. A state
@@ -179,14 +183,18 @@ def best_first(*, start: Hashable, moves: Callable[[Any], Iterable[Hashable]],
     The frontier holds at most ``max_frontier`` states. Above that, states drawn
     at random from ``evict`` leave it, and the search forgets them, so it can
     find them again. ``observe`` gets the explorations and the size of the
-    frontier after each exploration.
+    frontier after each exploration. ``step`` gets the frontier, the index of the state
+    taken, that state, and whether the search took it with no choice (one state).
     """
     frontier: list[tuple[Hashable, int]] = [(start, 0)]
     seen = {start}
     expansions = 0
     while frontier and expansions < max_expansions:
-        index = 0 if len(frontier) == 1 else choose([state for state, _ in frontier])
+        states = [state for state, _ in frontier]
+        index = 0 if len(frontier) == 1 else choose(states)
         state, depth = frontier.pop(index)
+        if step is not None:
+            step(states, index, state, len(states) == 1)
         expansions += 1
         if observe is not None:
             observe(expansions, len(frontier))

@@ -185,6 +185,27 @@ If your settings are different from an official benchmark, the results go to `re
 
 Hosted models can change over time. Each record holds the model name that the API returned (for example `jev-1.13.0`) and the date of the run.
 
+### Trace files
+
+`run` also writes the steps of each trial to `traces/<benchmark>/<chooser>/<domain>.<heuristic>/<trial>.jsonl.gz`. Git ignores these files. The first line of a file describes the trial. Each other line is one state that the search explored:
+
+| field | what it is |
+|---|---|
+| `chosen` | the state that the model chose |
+| `chosen_distance`, `best_distance` | the number of moves to the goal from the chosen state, and from the best state of the frontier |
+| `regret` | `chosen_distance` minus `best_distance`. 0 means that the model chose a best state. |
+| `best_rank` | the place of the best state in the model's order of probability. 0 is first. |
+| `top` | the 5 states with the highest probability, each with its probability and its distance |
+| `requests`, `input_tokens`, `latencies_ms`, `refusals` | the cost of the step |
+
+A trial that ran before the trace files existed has no trace. To make the traces, run the trials again:
+
+```bash
+uv run python -m beelinebench run --chooser <name> --retrace
+```
+
+This command runs each trial that has a result and no trace again. The new result replaces the old result, so that the result and the trace come from the same run. The command spends money.
+
 ## Price estimates
 
 A full run of benchmark {{ latest_benchmark }} has {{ trials }} trials for each of its {{ domain_count }} domains. The table gives the estimated price of one full run for each hosted model.

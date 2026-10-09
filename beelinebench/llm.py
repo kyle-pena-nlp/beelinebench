@@ -56,6 +56,7 @@ def llm_chooser(client: anthropic.Anthropic, *, model: str, effort: str | None,
         output_config["effort"] = effort
 
     def choose(states: Sequence[Any]) -> int:
+        spend.probabilities = None  # the model answers with one number, and no probabilities
         positions = list(range(len(states)))
         order.shuffle(positions)
         listing = "\n".join(f"{n}. {render(states[i])}" for n, i in enumerate(positions, 1))

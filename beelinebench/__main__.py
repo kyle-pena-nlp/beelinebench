@@ -44,12 +44,15 @@ from . import benchmark, config, publishing, readme
 from .benchmark import Benchmark
 from .domains import blocksworld, countdown, rush_hour, tiles, wikispeedia, word_ladder
 from .rng import Draws
-from .run import (Record, append, baseline, best, geometric_mean, measure, read, results_file,
-                  shortest, summarise, wander)
+from .run import (Record, append, baseline, best, geometric_mean, measure, read, replace,
+                  results_file, shortest, summarise, trace_file, wander)
 from .search import BudgetExhausted, ChooserError, Problem, Spend, Wallet, efficiency
 
 PROJECT = Path(__file__).resolve().parent.parent
 RESULTS = PROJECT / "results"
+#: The steps of each trial of a model arm: traces/<benchmark>/<chooser>/<file>/<trial>.jsonl.gz.
+#: Git ignores them.
+TRACES = PROJECT / "traces"
 #: The total cost of each model over all runs: .spend/<chooser>.json.
 SPEND = PROJECT / ".spend"
 OFFICIAL = PROJECT / "benchmarks.toml"
@@ -158,14 +161,20 @@ def run(args: argparse.Namespace) -> None:
         finished = run_chooser(chooser, chosen, label, domains, trials,
                                max_requests=args.max_requests or chooser.max_requests,
                                max_input_tokens=args.max_input_tokens or chooser.max_input_tokens,
-                               max_cost=chooser.max_cost or cfg.run.max_cost)
+                               max_cost=chooser.max_cost or cfg.run.max_cost,
+                               retrace=args.retrace)
         show_match(chooser.name, chosen, label, domains, officials, finished)
 
 
 def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
                 domains: list[str], trials: int, *, max_requests: int,
-                max_input_tokens: int, max_cost: float | None = None) -> bool:
+                max_input_tokens: int, max_cost: float | None = None,
+                retrace: bool = False) -> bool:
     """Run one chooser over ``domains``. False when it stopped at a limit.
+
+    Each trial writes a trace. With ``retrace``, a trial that has a result and no
+    trace runs again, and its new result takes the place of the old one, so that the
+    result and the trace are of the same run.
 
     With ``max_cost`` and a price, the run stops before the request that would start
     when the model's cost over all runs is ``max_cost`` or more.
@@ -180,7 +189,12 @@ def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
         for domain in domains:
             make = maker(domain, chosen.domains[domain])
             path = results_file(RESULTS, label, chooser.name, make(1))
-            done = {record.trial for record in read(path)}
+            recorded = {record.trial for record in read(path)}
+            if retrace:
+                done = {t for t in recorded
+                        if trace_file(TRACES, label, chooser.name, make(t)).exists()}
+            else:
+                done = recorded
             bench = bars.add_task(f"{chooser.name} · {domain}/{make(1).heuristic_name}",
                                   total=trials,
                                   completed=len(done & set(range(1, trials + 1))), status="")
@@ -194,7 +208,8 @@ def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
                 try:
                     record = measure(problem, rules=chosen, label=label, choose=choose,
                                      chooser=chooser.name, model=chooser.model, spend=spend,
-                                     observe=watcher(bars, current, trial, spend))
+                                     observe=watcher(bars, current, trial, spend),
+                                     trace=trace_file(TRACES, label, chooser.name, problem))
                 except BudgetExhausted:
                     console.print(f"[red]{chooser.name} stopped at {spend.requests:,} requests "
                                   f"and {spend.input_tokens:,} input tokens. "
@@ -204,7 +219,10 @@ def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
                     console.print(f"[red]{chooser.name} stopped: {error}. "
                                   f"{domain} trial {trial} is not recorded.")
                     return False
-                append(path, record)
+                if trial in recorded:
+                    replace(path, record)
+                else:
+                    append(path, record)
                 bars.advance(bench)
                 console.print(line_of(record))
             bars.remove_task(current)
@@ -546,6 +564,9 @@ def main() -> None:
                                  help="in place of the chooser's max_requests")
             command.add_argument("--max-input-tokens", type=int,
                                  help="in place of the chooser's max_input_tokens")
+            command.add_argument("--retrace", action="store_true",
+                                 help="run again each trial that has a result and no trace, "
+                                 "and put its new result in place of the old one")
 
     commands.add_parser("benchmarks", help="the official benchmarks, and those of the config"
                         ).set_defaults(handler=show_benchmarks)

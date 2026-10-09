@@ -187,21 +187,42 @@ If your settings are different from an official benchmark, the results go to `re
 
 Hosted models can change over time. Each record holds the model name that the API returned (for example `jev-1.13.0`) and the date of the run.
 
+### Trace files
+
+`run` also writes the steps of each trial to `traces/<benchmark>/<chooser>/<domain>.<heuristic>/<trial>.jsonl.gz`. Git ignores these files. The first line of a file describes the trial. Each other line is one state that the search explored:
+
+| field | what it is |
+|---|---|
+| `chosen` | the state that the model chose |
+| `chosen_distance`, `best_distance` | the number of moves to the goal from the chosen state, and from the best state of the frontier |
+| `regret` | `chosen_distance` minus `best_distance`. 0 means that the model chose a best state. |
+| `best_rank` | the place of the best state in the model's order of probability. 0 is first. |
+| `top` | the 5 states with the highest probability, each with its probability and its distance |
+| `requests`, `input_tokens`, `latencies_ms`, `refusals` | the cost of the step |
+
+A trial that ran before the trace files existed has no trace. To make the traces, run the trials again:
+
+```bash
+uv run python -m beelinebench run --chooser <name> --retrace
+```
+
+This command runs each trial that has a result and no trace again. The new result replaces the old result, so that the result and the trace come from the same run. The command spends money.
+
 ## Price estimates
 
 A full run of benchmark 1.0.0 has 100 trials for each of its 6 domains. The table gives the estimated price of one full run for each hosted model.
 
 | model | price for a million tokens | input tokens of a full run | estimated price of a full run | basis |
 |---|---|---|---|---|
-| Jev 1.13 | $0.042 input, output free | — | — | no results to estimate from |
-| GPT-6 Luna (Decisions) | $0.10 input, output free | — | — | no results to estimate from |
-| pplx-decider 1.1 | $0.02 input, output free | — | — | no results to estimate from |
-| pplx-decider 1.0 | $0.02 input, output free | — | — | no results to estimate from |
-| Liquid d1 | $0.04 input, output free | — | — | no results to estimate from |
-| Kev 4B | $0.042 input, output free | — | — | no results to estimate from |
-| Mercury Decide | $0.02 input, output free | — | — | no results to estimate from |
-| Clef | $0.24 input, output free | — | — | no results to estimate from |
-| Clef-flash | $0.09 input, output free | — | — | no results to estimate from |
+| Jev 1.13 | $0.042 input, output free | 203 million | $8.54 | measured on 415 trials; token counts of GPT-6 Luna (Decisions) |
+| GPT-6 Luna (Decisions) | $0.10 input, output free | 209 million | $20.93 | measured on 501 trials |
+| pplx-decider 1.1 | $0.02 input, output free | 193 million | $3.85 | measured on 336 trials; token counts of GPT-6 Luna (Decisions) |
+| pplx-decider 1.0 | $0.02 input, output free | 199 million | $3.98 | measured on 29 trials; token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
+| Liquid d1 | $0.04 input, output free | 296 million | $11.85 | measured on 11 trials; token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
+| Kev 4B | $0.042 input, output free | 661 million | $27.74 | measured on 1 trials; token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
+| Mercury Decide | $0.02 input, output free | 166 million | $3.32 | measured on 29 trials; token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
+| Clef | $0.24 input, output free | 193 million | $46.40 | token counts of GPT-6 Luna (Decisions), pplx-decider 1.1 |
+| Clef-flash | $0.09 input, output free | 1,085 million | $97.63 | measured on 25 trials; token counts of GPT-6 Luna (Decisions) |
 
 The estimate uses the mean input tokens and output tokens of a trial in `results/`. If a model has no results for a domain, the estimate uses the token counts of a different model. The basis column gives the source of the token counts.
 

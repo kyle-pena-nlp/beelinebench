@@ -65,6 +65,7 @@ def decisions_chooser(client: DecisionsClient, *, objective: str, context: str,
     text = f"Task: {TASK}\nGoal: {objective}\nContext: {context}"
 
     def choose(states: Sequence[Any]) -> int:
+        spend.probabilities = None
         labels = [render(state) for state in states]
         if len(set(labels)) != len(labels):
             raise ValueError("two frontier states have the same rendering")
@@ -88,6 +89,7 @@ def decisions_chooser(client: DecisionsClient, *, objective: str, context: str,
             return labels.index(shuffled[0])
         probabilities = {entry["value"]: float(entry["probability"])
                          for entry in answer["probabilities"]}
-        return max(range(len(labels)), key=lambda i: probabilities.get(labels[i], 0.0))
+        spend.probabilities = [probabilities.get(label, 0.0) for label in labels]
+        return max(range(len(labels)), key=lambda i: spend.probabilities[i])
 
     return choose

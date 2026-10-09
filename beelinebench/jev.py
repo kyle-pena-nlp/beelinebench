@@ -151,6 +151,7 @@ def jev_chooser(client: JevClient, *, objective: str, context: str,
     framing = {"task": shown(TASK), "goal": shown(objective), "context": shown(context)}
 
     def choose(states: Sequence[Any]) -> int:
+        spend.probabilities = None
         labels = [shown(render(state)) for state in states]
         if len(set(labels)) != len(labels):
             raise ValueError("two frontier states have the same rendering")
@@ -165,8 +166,8 @@ def jev_chooser(client: JevClient, *, objective: str, context: str,
         spend.add(input_tokens=reply.input_tokens, output_tokens=0,
                   seconds=reply.seconds, served=reply.served)
         probabilities = reply.answers["choose"]["probabilities"]
-        return max(range(len(labels)),
-                   key=lambda i: float(probabilities.get(labels[i], 0.0)))
+        spend.probabilities = [float(probabilities.get(label, 0.0)) for label in labels]
+        return max(range(len(labels)), key=lambda i: spend.probabilities[i])
 
     return choose
 

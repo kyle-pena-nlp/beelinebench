@@ -148,3 +148,47 @@ def test_the_random_arm_is_the_same_for_each_model():
     assert one.random_expansions == two.random_expansions
     assert one.random_score == (one.shortest_path + 1) / one.random_expansions
     assert one.random_score < one.baseline_score
+
+
+def test_a_trace_has_a_step_for_each_state_the_model_explored(tmp_path):
+    import gzip
+    import json
+
+    spend = Spend(max_requests=100, max_input_tokens=10**6)
+
+    def toward(states):
+        """Prefer the state nearest 3, and say so with probabilities, as a model does."""
+        weights = [1.0 / (1 + abs(3 - s)) for s in states]
+        spend.probabilities = [w / sum(weights) for w in weights]
+        spend.add(input_tokens=10, output_tokens=0, seconds=0.01, served="m")
+        return max(range(len(states)), key=lambda i: spend.probabilities[i])
+
+    path = tmp_path / "trace.jsonl.gz"
+    record = measure(line_problem(), rules=RULES, label="test", choose=toward, chooser="m",
+                     model="m", spend=spend, trace=path)
+    lines = [json.loads(line) for line in gzip.open(path, "rt")]
+    header, steps = lines[0], lines[1:]
+    assert header["trial"] == 1 and header["shortest_path"] == record.shortest_path
+    assert len(steps) == record.model_expansions
+    assert all(s["regret"] == 0 for s in steps)          # it always took a best state
+    chosen = [s for s in steps if not s["forced"]]
+    assert all(s["best_rank"] == 0 and len(s["top"]) <= 5 for s in chosen)
+    assert sum(s["requests"] for s in steps) == record.requests
+
+
+def test_replace_puts_a_record_in_place_of_the_same_trial(tmp_path):
+    from dataclasses import replace as changed
+
+    from beelinebench.run import Record, append, read, replace
+
+    base = Record(benchmark="t", chooser="m", model="m", domain="d", heuristic="h", trial=1,
+                  baseline_expansions=1, baseline_solved=True, model_expansions=1,
+                  model_solved=True, censored=False, shortest_path=1, oracle_expansions=2,
+                  score=0.5, baseline_score=0.5, oracle_score=1.0, baseline_path_length=1,
+                  model_path_length=1, path_score=1.0, requests=0, input_tokens=0,
+                  output_tokens=0, invalid_answers=0)
+    path = tmp_path / "r.jsonl"
+    append(path, base)
+    append(path, changed(base, trial=2))
+    replace(path, changed(base, score=0.25))
+    assert [(r.trial, r.score) for r in read(path)] == [(1, 0.25), (2, 0.5)]

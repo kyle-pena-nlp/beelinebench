@@ -126,12 +126,78 @@ def best(problem: Problem, rules: Benchmark, distance: dict):
                       evict=Draws(problem.domain, problem.trial, "evict", "oracle"))
 
 
+#: How many of the model's most probable states a trace step keeps.
+TOP = 5
+
+
+class Tracer:
+    """The steps of the model arm of one trial, for a trace file.
+
+    A step is one state taken off the frontier. It records the chosen state, its true
+    distance to the goal, the best distance of the frontier, and the oracle distance
+    regret: the chosen distance minus the best. With the model's probabilities it also
+    records the rank of the best state, and the model's ``TOP`` most probable states.
+    The cost fields are what the step's request (or requests) used.
+    """
+
+    def __init__(self, problem: Problem, distance: dict, spend: Spend) -> None:
+        self.problem, self.distance, self.spend = problem, distance, spend
+        self.steps: list[dict] = []
+        self.mark = self.counters()
+
+    def counters(self) -> tuple:
+        s = self.spend
+        return (s.requests, s.input_tokens, s.output_tokens, s.refusals, s.invalid_answers,
+                len(s.latencies_ms))
+
+    def __call__(self, states: list, index: int, state, forced: bool) -> None:
+        far = lambda s: self.distance.get(s)  # None: no way to the goal from s
+        reachable = [d for d in map(far, states) if d is not None]
+        best = min(reachable) if reachable else None
+        chosen = far(state)
+        now = self.counters()
+        before, self.mark = self.mark, now
+        step = {"step": len(self.steps) + 1, "frontier": len(states), "forced": forced,
+                "chosen": self.problem.render(state), "chosen_distance": chosen,
+                "best_distance": best,
+                "regret": None if chosen is None or best is None else chosen - best,
+                "requests": now[0] - before[0], "input_tokens": now[1] - before[1],
+                "output_tokens": now[2] - before[2], "refusals": now[3] - before[3],
+                "invalid_answers": now[4] - before[4],
+                "latencies_ms": self.spend.latencies_ms[before[5]:now[5]]}
+        probabilities = None if forced else self.spend.probabilities
+        if probabilities is not None and len(probabilities) == len(states):
+            ranked = sorted(range(len(states)), key=lambda i: -probabilities[i])
+            step["p_chosen"] = probabilities[index]
+            step["best_rank"] = next((rank for rank, i in enumerate(ranked)
+                                      if best is not None and far(states[i]) == best), None)
+            step["top"] = [{"p": probabilities[i], "distance": far(states[i])}
+                           for i in ranked[:TOP]]
+        self.steps.append(step)
+
+    def write(self, path: Path, header: dict) -> None:
+        import gzip
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(path, "wt", encoding="utf-8") as out:
+            out.write(json.dumps(header) + "\n")
+            for step in self.steps:
+                out.write(json.dumps(step) + "\n")
+
+
+def trace_file(traces: Path, label: str, chooser: str, problem: Problem) -> Path:
+    """One file for each trial: traces/<benchmark>/<chooser>/<domain>.<heuristic>/<trial>.jsonl.gz."""
+    return (traces / label / chooser / f"{problem.domain}.{problem.heuristic_name}"
+            / f"{problem.trial}.jsonl.gz")
+
+
 def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
             chooser: str, model: str, spend: Spend,
-            observe: Observer | None = None) -> Record:
+            observe: Observer | None = None, trace: Path | None = None) -> Record:
     """Run both arms on ``problem`` under ``rules``. ``spend`` is what ``choose`` adds to.
 
     ``label`` is the official benchmark that the run matches, or ``custom-<name>``.
+    With ``trace``, the steps of the model arm go to that file (see :class:`Tracer`).
     ``chooser`` is the name in ``beelinebench.toml``. ``model`` is the model name, and
     it seeds the random draws of the model arm.
     """
@@ -150,11 +216,19 @@ def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
         if observe is not None:
             observe("model", expansions, cap, frontier)
 
+    tracer = Tracer(problem, distance, spend) if trace is not None else None
     outcome = best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
                          choose=choose, max_expansions=cap,
                          max_frontier=rules.max_frontier,
                          evict=Draws(problem.domain, problem.trial, "evict", "model", model),
-                         observe=step)
+                         observe=step, step=tracer)
+    if tracer is not None:
+        tracer.write(trace, {"benchmark": label, "chooser": chooser, "model": model,
+                             "domain": problem.domain, "heuristic": problem.heuristic_name,
+                             "trial": problem.trial, "start": problem.render(problem.start),
+                             "objective": problem.objective, "shortest_path": d,
+                             "solved": outcome.solved, "expansions": outcome.expansions,
+                             "served_models": sorted(set(spend.served[first:]))})
     return Record(
         benchmark=label, chooser=chooser, model=model, domain=problem.domain,
         heuristic=problem.heuristic_name, trial=problem.trial,
@@ -190,6 +264,14 @@ def read(path: Path) -> list[Record]:
         return []
     with path.open(encoding="utf-8") as lines:
         return [Record(**json.loads(line)) for line in lines if line.strip()]
+
+
+def replace(path: Path, record: Record) -> None:
+    """Put ``record`` in place of the record of the same trial in ``path``."""
+    records = [record if r.trial == record.trial else r for r in read(path)]
+    temporary = path.with_suffix(".jsonl.replacing")
+    temporary.write_text("".join(json.dumps(asdict(r)) + "\n" for r in records))
+    temporary.replace(path)
 
 
 def append(path: Path, record: Record) -> None:
