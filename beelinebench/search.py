@@ -252,6 +252,11 @@ def efficiency(shortest: int, expansions: int) -> float:
     return (shortest + 1) / expansions
 
 
+def random_choice(draws: Draws) -> Chooser:
+    """The chooser with no information: a state of the frontier at random, from ``draws``."""
+    return lambda states: draws.below(len(states))
+
+
 def lowest(heuristic: Callable[[Any], Any]) -> Chooser:
     """The classic chooser: the state with the lowest heuristic value.
 

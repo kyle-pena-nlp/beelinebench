@@ -171,3 +171,50 @@ def test_replaced_text_reaches_the_api_and_the_answer_maps_back():
     assert choose(["a/b", "b/c"]) == 1
     assert sorted(sent[0]["questions"]["choose"]["criteria"]) == ["a|b", "b|c"]
     assert sent[0]["state"]["goal"] == "reach a|b" and sent[0]["state"]["context"] == "rows by |"
+
+
+def test_a_timeout_is_tried_again(monkeypatch):
+    import beelinebench.jev as jev
+
+    monkeypatch.setattr(jev.time, "sleep", lambda seconds: None)
+    calls = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) < 3:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json={"model": "m", "answers": {}, "usage": {}})
+
+    client = JevClient(api_key="k", model="m", api_base="https://example.test/v1",
+                       http=httpx.Client(transport=httpx.MockTransport(answer)))
+    assert client.ask({}, {}).served == "m" and len(calls) == 3
+
+
+def test_five_timeouts_stop_the_run(monkeypatch):
+    import beelinebench.jev as jev
+
+    monkeypatch.setattr(jev.time, "sleep", lambda seconds: None)
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down", request=request)
+
+    client = JevClient(api_key="k", model="m", api_base="https://example.test/v1",
+                       http=httpx.Client(transport=httpx.MockTransport(answer)))
+    with pytest.raises(JevError, match="did not answer"):
+        client.ask({}, {})
+
+
+def test_a_chooser_can_name_the_dated_model_that_must_answer():
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"model": "liquid/d1-20260930", "answers": {}, "usage": {}})
+
+    def client(served):
+        return JevClient(api_key="k", model="liquid/d1", api_base="https://openrouter.ai/api/alpha",
+                         endpoint="decisions", served=served,
+                         http=httpx.Client(transport=httpx.MockTransport(answer)))
+
+    assert client("liquid/d1-20260930").ask({}, {}).served == "liquid/d1-20260930"
+    with pytest.raises(JevError, match="asked for model 'liquid/d1-20260931'"):
+        client("liquid/d1-20260931").ask({}, {})
+    with pytest.raises(JevError, match="asked for model 'liquid/d1'"):
+        client(None).ask({}, {})

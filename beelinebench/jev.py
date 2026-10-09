@@ -47,24 +47,35 @@ class JevError(ChooserError):
 
 
 def post(http: httpx.Client, url: str, body: dict, headers: dict, *,
-         error: type[ChooserError]) -> tuple[dict, float]:
+         error: type[ChooserError], served: str | None = None) -> tuple[dict, float]:
     """POST ``body``, with retries. Give the response body and the seconds of the answered try.
 
-    The response must say that ``body["model"]`` answered. Any other model, or no
-    model, is an ``error``.
+    A timeout, a dropped connection, or a status of RETRY_STATUS is tried again, five
+    times in all.
+
+    The response must say that ``served`` answered, or ``body["model"]`` when ``served``
+    is ``None``. Any other model, or no model, is an ``error``. OpenRouter, for example,
+    takes ``liquid/d1`` and answers with the dated name ``liquid/d1-20260930``.
     """
     for attempt in range(5):
         started = time.monotonic()
-        response = http.post(url, json=body, headers=headers)
+        try:
+            response = http.post(url, json=body, headers=headers)
+        except httpx.TransportError as exc:  # a timeout, or a dropped connection
+            if attempt == 4:
+                raise error(f"{url} did not answer: {type(exc).__name__}: {exc}") from exc
+            time.sleep(min(8.0, 0.5 * 2**attempt))
+            continue
         if response.status_code < 400:
             seconds = time.monotonic() - started
             payload = response.json()
             if "answers" not in payload and isinstance(payload.get("result"), dict):
                 payload = payload["result"]  # Cloudflare's envelope
-            served = payload.get("model")
-            if served != body["model"]:
-                raise error(f"asked for model {body['model']!r}, and the API says "
-                            f"{served!r} answered")
+            expected = served or body["model"]
+            answered = payload.get("model")
+            if answered != expected:
+                raise error(f"asked for model {expected!r}, and the API says "
+                            f"{answered!r} answered")
             return payload, seconds
         # A 429 is usually "slow down". OpenAI also sends it when the account has no
         # credits, and Cloudflare when the free allocation of the day is used up.
@@ -100,8 +111,10 @@ class JevClient:
     """
 
     def __init__(self, *, api_key: str | None, model: str, api_base: str,
+                 served: str | None = None,
                  endpoint: str = "systemone", http: httpx.Client | None = None) -> None:
         self.model = model
+        self.served = served
         self.url = api_base.rstrip("/") + "/" + endpoint.strip("/")
         self.http = http or httpx.Client(timeout=120.0)
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -112,7 +125,8 @@ class JevClient:
         ``seconds`` is the time of the attempt that was answered.
         """
         body = {"model": self.model, "state": state, "questions": questions}
-        payload, seconds = post(self.http, self.url, body, self.headers, error=JevError)
+        payload, seconds = post(self.http, self.url, body, self.headers, error=JevError,
+                                served=self.served)
         usage = payload.get("usage") or {}
         return Reply(payload["answers"], int(usage.get("input_tokens", 0)), payload["model"],
                      seconds)

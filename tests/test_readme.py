@@ -62,9 +62,13 @@ def test_the_committed_figure_shows_the_current_results():
 
     choosers = config.load(PROJECT / "beelinebench.toml", OFFICIALS).choosers
     labels = {c.name: c.title for c in choosers.values()}
-    for name in readme.figures((PROJECT / readme.TEMPLATE).read_text(), OFFICIALS):
-        assert plot.is_current(PROJECT / readme.FIGURE.format(name), OFFICIALS[name],
-                               PROJECT / "results", labels, config.unpublished(choosers)), \
+    prices = {c.name: (c.price_input, c.price_output or 0.0)
+              for c in choosers.values() if c.price_input is not None}
+    for kind, name in readme.figures((PROJECT / readme.TEMPLATE).read_text(), OFFICIALS):
+        png = PROJECT / readme.FIGURES[kind].format(name)
+        extra = dict(prices=prices, kind="frontier") if kind == "frontier_figure" else {}
+        assert plot.is_current(png, OFFICIALS[name], PROJECT / "results", labels,
+                               config.unpublished(choosers), **extra), \
             "run `python -m beelinebench readme`"
 
 
@@ -73,7 +77,8 @@ def test_the_figure_placeholder_is_an_image():
     assert made == readme.HEADER + (
         "![The scores of each model and heuristic in benchmark 1.0.0, by domain, with 95% "
         "intervals](docs/benchmarks/1.0.0.png)")
-    assert readme.figures("{{ results_figure }} {{ results_figure 1.0.0 }}", OFFICIALS) == ["1.0.0"]
+    assert readme.figures("{{ results_figure }} {{ results_figure 1.0.0 }} {{ frontier_figure }}",
+                          OFFICIALS) == [("frontier_figure", "1.0.0"), ("results_figure", "1.0.0")]
 
 
 def test_a_price_estimate_uses_measured_tokens_or_borrows_them(tmp_path):
@@ -94,8 +99,8 @@ def test_a_price_estimate_uses_measured_tokens_or_borrows_them(tmp_path):
     choosers = {"a": chooser("a", 2.0), "b": chooser("b", 4.0), "local": chooser("local", None),
                 "c": chooser("c", 1.0, 5.0, protocol="anthropic")}
     table = readme.costs_table(one, tmp_path, choosers)
-    # 5 domains x 100 trials x 100 tokens = 50,000 tokens
-    assert "| A | $2.00 input, output free | 50 thousand | $0.10 | measured on 5 trials |" in table
-    assert "| B | $4.00 input, output free | 50 thousand | $0.20 | token counts of A |" in table
+    # 6 domains x 100 trials x 100 tokens = 60,000 tokens
+    assert "| A | $2.00 input, output free | 60 thousand | $0.12 | measured on 6 trials |" in table
+    assert "| B | $4.00 input, output free | 60 thousand | $0.24 | token counts of A |" in table
     assert "| C | $1.00 input, $5.00 output | — | — | no results to estimate from |" in table
     assert "LOCAL" not in table

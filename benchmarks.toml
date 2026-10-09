@@ -36,3 +36,8 @@ min_steps = 5
 [benchmark."1.0.0".domains.wikispeedia]
 heuristic = "category_distance"
 min_clicks = 3
+
+[benchmark."1.0.0".domains.rush_hour]
+heuristic = "blocking_cars"
+vehicles = 10
+min_moves = 6

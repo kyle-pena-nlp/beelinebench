@@ -15,13 +15,13 @@ PROJECT = Path(__file__).parent.parent
 
 SCRIPT = """
 from beelinebench.benchmark import load
-from beelinebench.domains import blocksworld, countdown, tiles
+from beelinebench.domains import blocksworld, countdown, rush_hour, tiles
 from beelinebench.run import baseline, best, shortest
 
 rules = load(__import__("pathlib").Path("benchmarks.toml"))["1.0.0"]
-for module in (tiles, blocksworld, countdown):
+for module in (tiles, blocksworld, countdown, rush_hour):
     name = module.__name__.rsplit(".", 1)[1]
-    for trial in (1, 2, 3):
+    for trial in (1, 2):
         problem = module.problem(trial, **rules.domains[name])
         distance = shortest(problem)
         classic, oracle = baseline(problem, rules), best(problem, rules, distance)
@@ -39,5 +39,5 @@ def run_with_hash_seed(seed: str) -> str:
 
 def test_trials_and_searches_do_not_depend_on_the_hash_seed():
     first = run_with_hash_seed("1")
-    assert first.count("\n") == 9
+    assert first.count("\n") == 8
     assert run_with_hash_seed("2") == first

@@ -3,7 +3,8 @@
 
 [run]
 benchmark = "1.0.0"                 # a benchmark of benchmarks.toml, or of this file
-choosers = ["jev-1.13", "luna", "pplx-decider", "clef", "clef-flash"]   # one after the other
+choosers = ["jev-1.13", "luna", "pplx-decider", "pplx-decider-1", "d1", "kev-4b",
+            "mercury-decide", "clef", "clef-flash"]   # one after the other
 # domains = ["tiles", "countdown"]     # leave out for every domain of the benchmark
 # trials = 5                        # leave out for the trials of the benchmark
 max_cost = 25.0                     # US dollars: the most one model may cost in all runs.
@@ -24,6 +25,9 @@ max_cost = 25.0                     # US dollars: the most one model may cost in
 # api_base          the address of the API. A local model is http://localhost:<port>/v1.
 #                   ${NAME} takes the value of NAME from .env or the environment.
 # endpoint          jev only: the path after api_base. The default is systemone.
+# served            jev only: the model name that each answer must give, when the API
+#                   answers with another name than `model`. OpenRouter answers with a
+#                   dated name, so this pins the version.
 # replace           jev only: text that the API gets in place of other text, in the
 #                   options and the framing. For example { "/" = "|" }.
 # api_key_env       the variable in .env or the environment that holds the key.
@@ -69,6 +73,63 @@ model = "pplx-decider-v1.1-27b"
 api_base = "https://api.perplexity.ai/v1"
 endpoint = "decisions"
 api_key_env = "PERPLEXITY_API_KEY"
+price_input = 0.02
+price_output = 0
+max_requests = 200000
+max_input_tokens = 1500000000       # $30
+
+# The first version of pplx-decider, for a comparison with 1.1.
+[chooser.pplx-decider-1]
+label = "pplx-decider 1.0"
+protocol = "jev"
+model = "pplx-decider-v1-27b"
+api_base = "https://api.perplexity.ai/v1"
+endpoint = "decisions"
+api_key_env = "PERPLEXITY_API_KEY"
+price_input = 0.02
+price_output = 0
+max_requests = 200000
+max_input_tokens = 1500000000       # $30
+
+# OpenRouter's Decisions API serves Jev's protocol at /api/alpha/decisions, for models of
+# many publishers. It answers with a dated name, which `served` pins.
+[chooser.d1]
+label = "Liquid d1"
+protocol = "jev"
+model = "liquid/d1"
+served = "liquid/d1-20260930"
+api_base = "https://openrouter.ai/api/alpha"
+endpoint = "decisions"
+api_key_env = "OPENROUTER_API_KEY"
+price_input = 0.04
+price_output = 0
+max_requests = 200000
+max_input_tokens = 750000000        # $30
+
+# Open weights (huggingface.co/jaredpalmer/kev-4b), served on OpenRouter by SiliconFlow.
+[chooser.kev-4b]
+label = "Kev 4B"
+protocol = "jev"
+model = "jaredpalmer/kev-4b"
+served = "jaredpalmer/kev-4b-20260924"
+api_base = "https://openrouter.ai/api/alpha"
+endpoint = "decisions"
+api_key_env = "OPENROUTER_API_KEY"
+price_input = 0.042
+price_output = 0
+max_requests = 200000
+max_input_tokens = 714000000        # $30
+
+# The paid route, at its list price. A free route (inception/mercury-decide:free) also
+# exists, and the same model answers it.
+[chooser.mercury-decide]
+label = "Mercury Decide"
+protocol = "jev"
+model = "inception/mercury-decide"
+served = "inception/mercury-decide-20260930"
+api_base = "https://openrouter.ai/api/alpha"
+endpoint = "decisions"
+api_key_env = "OPENROUTER_API_KEY"
 price_input = 0.02
 price_output = 0
 max_requests = 200000

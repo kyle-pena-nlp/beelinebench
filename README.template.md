@@ -10,6 +10,12 @@ Scores for benchmark {{ latest_benchmark }}, from the files in `results/{{ lates
 
 {{ results_figure }}
 
+### Score and cost
+
+{{ frontier_figure }}
+
+Each panel shows the cost of one step against the score of each model. A step is one request, in which the model chooses one state. The score axis is reversed, so the best models are at the bottom left: a high score and a low cost. The frontier falls from the accurate and expensive models at the top left to the cheap models at the bottom right. A dark diamond is on the efficient frontier: no other model has a higher score and a lower cost. The line joins the models on the frontier. A legend names the models of its panel. An asterisk (*) after a name shows that at least one run of the model did not solve within the limit. The cost of a step does not include the number of steps, so a model with a low score also uses more steps.
+
 ## Introduction
 
 BeelineBench uses the model as the ranker in a best-first search. At each step, the search sends all open states (the frontier) to the model in one request. The search stops when it finds the goal.
@@ -28,6 +34,7 @@ The table shows three other columns on the same trials:
 |---|---|
 | heuristic score | the same score for the classic heuristic of the domain. A model is better than the heuristic when its score is higher. |
 | oracle score | the same score for a chooser that knows the true distance to the goal. It is below 1.0 only when the frontier limit drops a state of the shortest path. |
+| random choice | the same score for a chooser that takes a state of the frontier at random. It is the floor: a model below it has choices that carry no information. The figure shows it as an open circle. |
 | path score | the shortest path divided by the length of the path that the model found, over the trials that it solved. 1.0 means that the model's path is a shortest path. |
 | refusals | the share of the model's requests that it refused. Only OpenAI's Decisions API refuses. The chooser then asks once more with the options in a new order, and if that is refused too, it takes the first option. |
 
@@ -102,7 +109,7 @@ Other commands:
 | `choosers` | Lists the choosers in `beelinebench.toml`. |
 | `probe` | Sends one question with 255 options to a chooser, and shows the answer. Spends one or two requests. |
 | `report` | Prints the scores, the share of solved trials, the served model, and the request times. |
-| `plot` | Draws the scores of a benchmark to `docs/benchmarks/<version>.png`, one row for each model in each domain, with the 95% interval. Needs `uv sync --extra plot`. |
+| `plot` | Draws the scores of a benchmark to `docs/benchmarks/<version>.png`, one row for each model in each domain, with the 95% interval. It also draws the score against the cost of a step to `docs/benchmarks/<version>-frontier.png`. Needs `uv sync --extra plot`. |
 
 ### Choosers
 
@@ -111,13 +118,17 @@ Other commands:
 | `jev-1.13` | TypeSafe Jev 1.13 (`jev-1.13.0`) | hosted, `api.typesafe.ai` |
 | `luna` | OpenAI GPT-6 Luna, through the Decisions API (`gpt-6-luna`) | hosted, OpenAI. Needs `OPENAI_API_KEY`. |
 | `pplx-decider` | Perplexity pplx-decider 1.1 (`pplx-decider-v1.1-27b`) | hosted, Perplexity. Needs `PERPLEXITY_API_KEY`. |
+| `pplx-decider-1` | Perplexity pplx-decider 1.0 (`pplx-decider-v1-27b`) | hosted, Perplexity. Needs `PERPLEXITY_API_KEY`. |
+| `d1` | Liquid d1 (`liquid/d1-20260930`) | hosted, OpenRouter. Needs `OPENROUTER_API_KEY`. |
+| `kev-4b` | Kev 4B, open weights (`jaredpalmer/kev-4b-20260924`) | hosted, OpenRouter (SiliconFlow). Needs `OPENROUTER_API_KEY`. |
+| `mercury-decide` | Inception Mercury Decide (`inception/mercury-decide-20260930`) | hosted, OpenRouter. Needs `OPENROUTER_API_KEY`. |
 | `clef` | Cloudflare Clef, 27B (`clef`) | hosted, Cloudflare Workers AI. Needs `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. |
 | `clef-flash` | Cloudflare Clef-flash, 9B (`clef-flash`) | hosted, Cloudflare Workers AI. Needs the same two values. |
 | `haiku` | Claude Haiku 4.5, as a reference. The README does not show its results. | hosted, Anthropic. Needs `ANTHROPIC_API_KEY`. |
 | `clef-local`, `clef-flash-local` | Clef and Clef-flash on your own GPU | local, ports 8001 and 8002 |
 | `local` | any model that uses the Jev protocol | local, port 8000 |
 
-A choice model uses the Jev protocol or OpenAI's Decisions API. Jev serves the Jev protocol at `{api_base}/systemone`. Perplexity serves it at `/v1/decisions`, and Cloudflare serves it at the name of the model. OpenAI's Decisions API is at `{api_base}/decisions`. Both get one choice question over the whole frontier, and the chooser takes the option with the highest probability. Each response must name the model that was asked for, or the run stops. If your model is a Python function, `beelinebench.serve` puts it on a local port:
+A choice model uses the Jev protocol or OpenAI's Decisions API. Jev serves the Jev protocol at `{api_base}/systemone`. Perplexity serves it at `/v1/decisions`, Cloudflare serves it at the name of the model, and OpenRouter serves it at `/api/alpha/decisions` for models of many publishers. OpenAI's Decisions API is at `{api_base}/decisions`. Both get one choice question over the whole frontier, and the chooser takes the option with the highest probability. Each response must name the model that was asked for, or the run stops. If your model is a Python function, `beelinebench.serve` puts it on a local port:
 
 ```bash
 python -m beelinebench.serve --port 8001 my_model:systemone
@@ -201,6 +212,7 @@ Benchmark {{ latest_benchmark }} has {{ domain_count }} domains. Each domain has
 - **Countdown** ([Wikipedia](https://en.wikipedia.org/wiki/Countdown_(game_show))): the player combines four numbers with addition, subtraction, multiplication, and division to make a target number.
 - **Word ladder** ([Wikipedia](https://en.wikipedia.org/wiki/Word_ladder)): the player changes one letter at a time to get from a start word to a target word, and each step must be a word.
 - **Wikispeedia** ([SNAP](https://snap.stanford.edu/data/wikispeedia.html)): the player clicks links from one Wikipedia article to the next, until the player gets to the target article.
+- **Rush Hour** ([Wikipedia](https://en.wikipedia.org/wiki/Rush_Hour_(puzzle))): the player slides cars and trucks on a 6 × 6 board until the red car can leave through the exit.
 
 ### Settings
 
@@ -211,6 +223,7 @@ Benchmark {{ latest_benchmark }} has {{ domain_count }} domains. Each domain has
 | `countdown` | `nearest_number` | the numbers that are left | 4 numbers from 1 to 25, and a target from 10 to 100 |
 | `word_ladder` | `letters_different` | a five-letter word | a random word, and a target at least 5 steps away |
 | `wikispeedia` | `category_distance` | a Wikipedia article title | an article pair from a completed human game, at least 3 clicks apart |
+| `rush_hour` | `blocking_cars` | a 6 × 6 board of vehicles | a random board with 10 vehicles and the red car, at least 6 moves from the solution |
 
 All scores use the same scale, where 1.0 is perfect. But some domains are harder than others, so compare scores from two different domains with care.
 
@@ -246,7 +259,17 @@ BeelineBench fixes its own random values: the trials, the option order, and the 
 
 ### OpenAI's Decisions API can refuse a question
 
-The Decisions API can answer a question with the type `refusal` and no choice. OpenAI does not document the cause, and the API has no setting for it. In a first partial run, the API refused 34 of 746 questions (4.6%) on the 8-puzzle. The puzzle text is harmless.
+The Decisions API can answer a question with the type `refusal` and no choice. OpenAI does not document the cause, and the API has no setting for it. In the full run of benchmark 1.0.0, the API refused 5,903 of 48,595 requests (12%). The refusals are not equal in the domains:
+
+| domain | refused requests | decisions that used the fallback |
+|---|---|---|
+| 8-puzzle | 3.3% | 0.4% |
+| Blocksworld | 0.0% | 0.0% |
+| Countdown | 0.6% | 0.1% |
+| Word ladder | 14.2% | 3.7% |
+| Wikispeedia | 54.9% | 34.1% |
+
+One Wikispeedia trial (trial 53) caused 2,521 of the 2,526 Wikispeedia refusals. The API refused almost all its questions after the first 79 requests, and the trial stopped at the limit. The other 99 Wikispeedia trials had a maximum of two refusals each. The cause of the refusals in trial 53 is not known. The puzzle text of each domain is harmless.
 
 A refusal depends on the exact request. In a test, the API refused the same request five times. The same options in a different order got an answer. A different symbol for the gap, different instructions, or fewer options also got an answer.
 
@@ -257,6 +280,20 @@ When the API refuses a question, the chooser asks once more, with the options in
 Cloudflare's API for Clef returns the status 400 if an option name contains the character `/`. The error message says that `model`, `state`, and `questions` are missing, but the request contains them. The 8-puzzle uses `/` to divide the rows of a board. Thus, each 8-puzzle question fails.
 
 The `clef` and `clef-flash` choosers send `|` in place of `/`. Only the option names must not contain `/`. The replacement also applies to the goal and the context, so the model sees one notation. The `replace` setting in `beelinebench.toml` controls it. The other choosers send `/`.
+
+### OpenRouter answers with a dated model name
+
+OpenRouter takes a model name such as `liquid/d1`, and it answers with a dated name such as `liquid/d1-20260930`. The `served` setting of a chooser gives the dated name that each answer must give. Thus, the run uses one version of the model. If OpenRouter changes the version, the run stops.
+
+### Models that BeelineBench cannot use
+
+These decision models do not accept the question that BeelineBench sends:
+
+| model | reason |
+|---|---|
+| Upstage Solar Decide (`upstage/solar-decide`) | A choice question can have a maximum of 26 options. The frontier can have 255 states. |
+| Respan Span-01 Lite (`respan/span-01-lite`) | It accepts only yes-or-no questions. |
+| TypeSafe `jev-preview` | It answers as `jev-1.13.0` now, so its results are the same as Jev 1.13. |
 
 ### Errors from the APIs
 
@@ -314,7 +351,7 @@ Look at the heuristic score, the oracle score, and the time. If the heuristic sc
 A model can use the Jev protocol, OpenAI's Decisions API, or the Anthropic API. If it uses a different API, first do the steps in [Add a protocol](#add-a-protocol).
 
 1. Add a `[chooser.<name>]` table to `beelinebench.toml`. The comments at the top of the file describe each setting.
-2. If the API has model versions, set `model` to one version, for example `jev-1.13.0`. Each response must give that name.
+2. If the API has model versions, set `model` to one version, for example `jev-1.13.0`. Each response must give that name. If the API answers with a different name, for example a dated name, set `served` to that name.
 3. Set `price_input` and `price_output` to the list prices of the provider, in US dollars for a million tokens.
 4. Put the key in `.env`, with the name that `api_key_env` gives.
 5. Send one question with 255 options to the model:
@@ -406,6 +443,7 @@ To show a placeholder as text, put a backslash before it: `\\{{`.
 |---|---|
 | `\{{ latest_benchmark }}` | the newest official benchmark version |
 | `\{{ results_figure }}` | the figure of scores for the newest version, as an image. `\{{ results_figure 1.0.0 }}` gives the figure for version 1.0.0. |
+| `\{{ frontier_figure }}` | the figure of score against the cost of a step, with the efficient frontier, for the newest version. |
 | `\{{ results }}` | the table of scores for the newest version. `\{{ results 1.0.0 }}` gives the table for version 1.0.0. |
 | `\{{ trials }}` | the number of trials for each domain |
 | `\{{ max_expansions }}` | the explored-node limit of each run, for example 2,500 |

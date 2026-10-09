@@ -7,6 +7,7 @@
     python -m beelinebench choosers
     python -m beelinebench probe --chooser luna   # one question of 255 options. Spends a little.
     python -m beelinebench report
+    python -m beelinebench fill               # add missing reference arms to old results. Sends nothing.
     python -m beelinebench plot                   # docs/benchmarks/<version>.png, the scores as a figure
     python -m beelinebench download
     python -m beelinebench publish 1.0.0          # the page of a benchmark, and its link
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import functools
 import io
 import tarfile
 from collections.abc import Callable
@@ -40,10 +42,10 @@ from rich.table import Table
 
 from . import benchmark, config, publishing, readme
 from .benchmark import Benchmark
-from .domains import blocksworld, countdown, tiles, wikispeedia, word_ladder
+from .domains import blocksworld, countdown, rush_hour, tiles, wikispeedia, word_ladder
 from .rng import Draws
 from .run import (Record, append, baseline, best, geometric_mean, measure, read, results_file,
-                  shortest, summarise)
+                  shortest, summarise, wander)
 from .search import BudgetExhausted, ChooserError, Problem, Spend, Wallet, efficiency
 
 PROJECT = Path(__file__).resolve().parent.parent
@@ -65,8 +67,9 @@ def maker(domain: str, settings: dict[str, Any]) -> Callable[[int], Problem]:
         ladder = word_ladder.load(PROJECT / word_ladder.DATA)
         return lambda trial: word_ladder.problem(trial, ladder, **settings)
     problem = {"tiles": tiles.problem, "blocksworld": blocksworld.problem,
-               "countdown": countdown.problem}[domain]
-    return lambda trial: problem(trial, **settings)
+               "countdown": countdown.problem, "rush_hour": rush_hour.problem}[domain]
+    # A trial can take seconds to make (Rush Hour rejects easy boards), so keep each one.
+    return functools.cache(lambda trial: problem(trial, **settings))
 
 
 def progress() -> Progress:
@@ -358,11 +361,56 @@ def make_plot(args: argparse.Namespace) -> None:
         choosers = config.load(args.config, officials).choosers
         labels = {c.name: c.title for c in choosers.values()}
         plot.draw(officials[name], RESULTS, target, labels, config.unpublished(choosers))
+        frontier_png = target.with_name(target.stem + "-frontier.png")
+        plot.draw_frontier(officials[name], RESULTS, frontier_png, labels,
+                           config.unpublished(choosers), price_list(choosers))
+        console.print(f"wrote {frontier_png}")
     except ImportError:
         raise SystemExit("plot needs matplotlib. Run `uv sync --extra plot`.")
     except ValueError as error:
         raise SystemExit(str(error))
     console.print(f"wrote {target}")
+
+
+def fill(args: argparse.Namespace) -> None:
+    """Add the random arm to records that do not have it. Sends no requests.
+
+    Do not fill the files of a chooser while it runs: the run appends to them.
+    """
+    import dataclasses
+    import json
+
+    officials = benchmark.load(OFFICIAL)
+    cfg = config.load(args.config, officials)
+    every = {**officials, **{f"custom-{name}": b for name, b in cfg.benchmarks.items()}}
+    makers: dict = {}
+    for path in sorted(RESULTS.glob("*/*/*.jsonl")):
+        label, chooser = path.parent.parent.name, path.parent.name
+        if args.chooser and chooser not in args.chooser:
+            continue
+        if label not in every:
+            console.print(f"[yellow]skipped {path.relative_to(PROJECT)}: no benchmark {label}")
+            continue
+        domain = path.stem.split(".")[0]
+        records = read(path)
+        missing = [r for r in records if r.random_score is None]
+        if not missing:
+            continue
+        rules = every[label]
+        make = makers.setdefault((label, domain), maker(domain, rules.domains[domain]))
+        filled = []
+        for r in records:
+            if r.random_score is None:
+                problem = make(r.trial)
+                d = shortest(problem)[problem.start]
+                aimless = wander(problem, rules)
+                r = dataclasses.replace(r, random_expansions=aimless.expansions,
+                                        random_score=efficiency(d, aimless.expansions))
+            filled.append(r)
+        temporary = path.with_suffix(".jsonl.filling")
+        temporary.write_text("".join(json.dumps(dataclasses.asdict(r)) + "\n" for r in filled))
+        temporary.replace(path)
+        console.print(f"{path.relative_to(PROJECT)}: added the random arm to {len(missing)} trials")
 
 
 def check_docs(args: argparse.Namespace) -> None:
@@ -387,6 +435,28 @@ def publish(args: argparse.Namespace) -> None:
         console.print(f"{args.version} already has a page and a link")
 
 
+def price_list(choosers: dict[str, config.ChooserConfig]) -> dict[str, tuple[float, float]]:
+    return {c.name: (c.price_input, c.price_output or 0.0)
+            for c in choosers.values() if c.price_input is not None}
+
+
+def figure_is_current(kind: str, png: Path, b: Benchmark, labels, hidden, prices) -> bool:
+    from . import plot
+
+    if kind == "frontier_figure":
+        return plot.is_current(png, b, RESULTS, labels, hidden, prices, kind="frontier")
+    return plot.is_current(png, b, RESULTS, labels, hidden)
+
+
+def draw_figure(kind: str, png: Path, b: Benchmark, labels, hidden, prices) -> None:
+    from . import plot
+
+    if kind == "frontier_figure":
+        plot.draw_frontier(b, RESULTS, png, labels, hidden, prices)
+    else:
+        plot.draw(b, RESULTS, png, labels, hidden)
+
+
 def make_readme(args: argparse.Namespace) -> None:
     from . import plot
 
@@ -396,6 +466,7 @@ def make_readme(args: argparse.Namespace) -> None:
     choosers = config.load(args.config, officials).choosers
     labels = {c.name: c.title for c in choosers.values()}
     hidden = config.unpublished(choosers)
+    prices = price_list(choosers)
     try:
         text = readme.render(template.read_text(), officials, RESULTS, choosers)
         figures = readme.figures(template.read_text(), officials)
@@ -403,12 +474,12 @@ def make_readme(args: argparse.Namespace) -> None:
         raise SystemExit(f"{template.name}: {error}")
     current = target.read_text() if target.exists() else ""
     if not args.check:
-        for name in figures:
-            png = PROJECT / readme.FIGURE.format(name)
-            if plot.is_current(png, officials[name], RESULTS, labels, hidden):
+        for kind, name in figures:
+            png = PROJECT / readme.FIGURES[kind].format(name)
+            if figure_is_current(kind, png, officials[name], labels, hidden, prices):
                 continue
             try:
-                plot.draw(officials[name], RESULTS, png, labels, hidden)
+                draw_figure(kind, png, officials[name], labels, hidden, prices)
             except ImportError:
                 raise SystemExit("the README shows a figure, and drawing it needs matplotlib. "
                                  "Run `uv sync --extra plot`.")
@@ -417,11 +488,11 @@ def make_readme(args: argparse.Namespace) -> None:
         console.print(f"wrote {target.name}" if text != current
                       else f"{target.name} is already up to date")
         return
-    old = [name for name in figures
-           if not plot.is_current(PROJECT / readme.FIGURE.format(name), officials[name],
-                                  RESULTS, labels, hidden)]
+    old = [readme.FIGURES[kind].format(name) for kind, name in figures
+           if not figure_is_current(kind, PROJECT / readme.FIGURES[kind].format(name),
+                                    officials[name], labels, hidden, prices)]
     if old:
-        raise SystemExit(f"the figure of {', '.join(old)} does not show the current results. "
+        raise SystemExit(f"{', '.join(old)} does not show the current results. "
                          "Run `python -m beelinebench readme`, and commit the figure.")
     if text != current:
         diff = difflib.unified_diff(current.splitlines(keepends=True),
@@ -484,6 +555,10 @@ def main() -> None:
                                   "chooser. Spends one or two requests.")
     command.set_defaults(handler=probe)
     command.add_argument("--chooser", required=True)
+    command = commands.add_parser("fill", help="add missing reference arms to old results. "
+                                  "Sends nothing. Do not use it on a chooser that runs.")
+    command.set_defaults(handler=fill)
+    command.add_argument("--chooser", nargs="+", help="only these choosers")
     commands.add_parser("report", help="the score of each result file"
                         ).set_defaults(handler=report)
     command = commands.add_parser("plot", help="the scores of an official benchmark as a "

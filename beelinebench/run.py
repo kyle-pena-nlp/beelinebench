@@ -30,7 +30,7 @@ from pathlib import Path
 from .benchmark import Benchmark
 from .rng import Draws
 from .search import (Chooser, Problem, Spend, best_first, distances_to_goal, efficiency,
-                     lowest, oracle)
+                     lowest, oracle, random_choice)
 
 
 @dataclass(frozen=True)
@@ -74,6 +74,10 @@ class Record:
     latencies_ms: tuple[int, ...] = ()
     #: Answers that refused the question. ``requests`` includes the requests asked again.
     refusals: int = 0
+    #: The random arm: the same search with a state chosen at random. It is the same for
+    #: each model, because its draws come from the domain and the trial only.
+    random_expansions: int | None = None
+    random_score: float | None = None
 
 
 def now() -> str:
@@ -106,6 +110,14 @@ def shortest(problem: Problem) -> dict:
     return distance
 
 
+def wander(problem: Problem, rules: Benchmark):
+    """The random arm: the search with a state of the frontier chosen at random."""
+    return best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
+                      choose=random_choice(Draws(problem.domain, problem.trial, "random")),
+                      max_expansions=rules.max_expansions, max_frontier=rules.max_frontier,
+                      evict=Draws(problem.domain, problem.trial, "evict", "random"))
+
+
 def best(problem: Problem, rules: Benchmark, distance: dict):
     """The oracle arm: the search that the frontier cap allows with a perfect chooser."""
     return best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
@@ -126,6 +138,7 @@ def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
     distance = shortest(problem)
     d = distance[problem.start]
     perfect = best(problem, rules, distance)
+    aimless = wander(problem, rules)
     classic = baseline(problem, rules, observe)
     before = Spend(**{k: v for k, v in vars(spend).items()
                       if k not in ("latencies_ms", "served")})
@@ -152,6 +165,8 @@ def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
         score=efficiency(d, outcome.expansions),
         baseline_score=efficiency(d, classic.expansions),
         oracle_score=efficiency(d, perfect.expansions),
+        random_expansions=aimless.expansions,
+        random_score=efficiency(d, aimless.expansions),
         baseline_path_length=classic.path_length,
         model_path_length=outcome.path_length,
         path_score=d / outcome.path_length if outcome.solved else None,

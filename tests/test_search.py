@@ -134,3 +134,17 @@ def test_a_wallet_stops_the_run_at_its_limit_and_keeps_its_total(tmp_path):
         check(spend)
     again = Wallet.open(path, price_input=2.0, price_output=0.0, max_cost=3.0, start=(0, 0, 0))
     assert (again.input_tokens, again.requests, again.cost) == (1_500_000, 11, 3.0)
+
+
+def test_the_random_arm_is_the_same_for_each_model():
+    from beelinebench.domains import tiles
+
+    problem = tiles.problem(1, heuristic="manhattan", scramble=12)
+    spend = Spend(max_requests=0, max_input_tokens=0)
+    one = measure(problem, rules=RULES, label="test", choose=lowest(problem.heuristic),
+                  chooser="a", model="a", spend=spend)
+    two = measure(problem, rules=RULES, label="test", choose=lambda states: 0,
+                  chooser="b", model="b", spend=spend)
+    assert one.random_expansions == two.random_expansions
+    assert one.random_score == (one.shortest_path + 1) / one.random_expansions
+    assert one.random_score < one.baseline_score

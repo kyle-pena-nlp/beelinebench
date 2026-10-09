@@ -37,6 +37,9 @@ class ChooserConfig:
     label: str | None = None
     #: jev only: the path after ``api_base``.
     endpoint: str = "systemone"
+    #: jev only: the model name that each answer must give, when the API answers with a
+    #: name other than ``model``. OpenRouter answers with a dated name, for example.
+    served: str | None = None
     #: jev only: text in the options and the framing, and the text that the API gets in its place.
     replace: dict[str, str] = field(default_factory=dict)
     #: The most that this model may cost in all runs. ``None`` takes ``[run] max_cost``.
@@ -88,6 +91,7 @@ def load(path: Path, officials: dict[str, Benchmark]) -> Config:
             effort=table.get("effort"), trials=table.get("trials"),
             max_requests=table["max_requests"], max_input_tokens=table["max_input_tokens"],
             label=table.get("label"), endpoint=table.get("endpoint", "systemone"),
+            served=table.get("served"),
             replace=dict(table.get("replace", {})), publish=table.get("publish", True),
             max_cost=table.get("max_cost"),
             price_input=table.get("price_input"), price_output=table.get("price_output"))
@@ -143,7 +147,8 @@ def factory(config: ChooserConfig, env_file: Path
         from .jev import JevClient, jev_chooser
 
         client = JevClient(api_key=key(config, env_file), model=config.model,
-                           api_base=expand(config.api_base, env_file), endpoint=config.endpoint)
+                           api_base=expand(config.api_base, env_file), endpoint=config.endpoint,
+                           served=config.served)
         return lambda problem, spend, order: jev_chooser(
             client, objective=problem.objective, context=problem.context,
             render=problem.render, spend=spend, order=order, replace=config.replace)

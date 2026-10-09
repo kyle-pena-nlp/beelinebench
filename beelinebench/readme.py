@@ -36,6 +36,8 @@ HEADER = ("<!-- Made by `python -m beelinebench readme` from README.template.md.
 
 #: The figure of a benchmark, from the project root.
 FIGURE = "docs/benchmarks/{}.png"
+#: For each figure placeholder, the path of its image, from the project root.
+FIGURES = {"results_figure": FIGURE, "frontier_figure": "docs/benchmarks/{}-frontier.png"}
 
 PLACEHOLDER = re.compile(r"(?<!\\)\{\{\s*([a-z_]+)(?:\s+([^\s}]+))?\s*\}\}")
 
@@ -181,6 +183,10 @@ def placeholders(officials: dict[str, Benchmark], results: Path,
         "results_figure": lambda argument: (
             f"![The scores of each model and heuristic in benchmark {official(argument).name}, "
             f"by domain, with 95% intervals]({FIGURE.format(official(argument).name)})"),
+        "frontier_figure": lambda argument: (
+            f"![The score against the cost of a step for each model in benchmark "
+            f"{official(argument).name}, by domain, with the efficient frontier]"
+            f"({FIGURES['frontier_figure'].format(official(argument).name)})"),
         "trials": lambda argument: str(official(argument).trials),
         "max_expansions": lambda argument: f"{official(argument).max_expansions:,}",
         "domain_count": lambda argument: str(len(official(argument).domains)),
@@ -188,11 +194,11 @@ def placeholders(officials: dict[str, Benchmark], results: Path,
     }
 
 
-def figures(template: str, officials: dict[str, Benchmark]) -> list[str]:
-    """The benchmarks whose figure the template shows."""
+def figures(template: str, officials: dict[str, Benchmark]) -> list[tuple[str, str]]:
+    """The figures that the template shows: each placeholder name and its benchmark."""
     latest = list(officials)[-1]
-    return sorted({match.group(2) or latest for match in PLACEHOLDER.finditer(template)
-                   if match.group(1) == "results_figure"})
+    return sorted({(match.group(1), match.group(2) or latest)
+                   for match in PLACEHOLDER.finditer(template) if match.group(1) in FIGURES})
 
 
 def render(template: str, officials: dict[str, Benchmark], results: Path,
