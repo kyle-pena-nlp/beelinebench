@@ -1,0 +1,38 @@
+# The official benchmarks.
+#
+# A new version is a new table. A table is never changed or removed, so any
+# older version can be run again. The code keeps every parameter that a table
+# here uses, with the same meaning.
+#
+# trials                    trials 1 to N of each domain
+# max_expansions            both arms stop after this many explorations, solved or not
+# max_frontier              the most states the frontier holds. States above it leave at random.
+# domains.<name>            the heuristic of the domain, and the parameters of its trials
+
+[benchmark."1.0.0"]
+trials = 100
+max_expansions = 2500
+max_frontier = 255
+
+[benchmark."1.0.0".domains.tiles]
+heuristic = "manhattan"
+scramble = 12
+
+[benchmark."1.0.0".domains.blocksworld]
+heuristic = "h_ff"
+blocks = 7
+
+[benchmark."1.0.0".domains.countdown]
+heuristic = "nearest_number"
+numbers = 4
+largest_number = 25
+smallest_target = 10
+largest_target = 100
+
+[benchmark."1.0.0".domains.word_ladder]
+heuristic = "letters_different"
+min_steps = 5
+
+[benchmark."1.0.0".domains.wikispeedia]
+heuristic = "category_distance"
+min_clicks = 3

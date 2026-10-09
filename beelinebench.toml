@@ -1,0 +1,156 @@
+# What `python -m beelinebench run` runs, and the choosers it can use.
+# Flags on the command line take the place of the values here.
+
+[run]
+benchmark = "1.0.0"                 # a benchmark of benchmarks.toml, or of this file
+choosers = ["jev-1.13", "luna", "pplx-decider", "clef", "clef-flash"]   # one after the other
+# domains = ["tiles", "countdown"]     # leave out for every domain of the benchmark
+# trials = 5                        # leave out for the trials of the benchmark
+
+# A chooser:
+#
+# protocol          "jev": a choice model that answers like Jev, at POST {api_base}/{endpoint}.
+#                   Jev, Perplexity's pplx-decider and Cloudflare's Clef use it.
+#                   "openai": OpenAI's Decisions API, at POST {api_base}/decisions. One choice
+#                   question over the frontier, as for Jev. api_base defaults to OpenAI's.
+#                   "anthropic": a Claude model, for the LLM reference figure.
+# label             the name of the model for a reader, in the plot. Leave it out for the
+#                   name of the chooser.
+# model             the model name the API takes. It also seeds the model arm's random
+#                   draws, so the same model gets the same draws on every machine.
+# api_base          the address of the API. A local model is http://localhost:<port>/v1.
+#                   ${NAME} takes the value of NAME from .env or the environment.
+# endpoint          jev only: the path after api_base. The default is systemone.
+# replace           jev only: text that the API gets in place of other text, in the
+#                   options and the framing. For example { "/" = "|" }.
+# api_key_env       the variable in .env or the environment that holds the key.
+#                   Leave it out when the API takes no key, as a local model may not.
+# publish           false leaves the chooser out of the README: its figure, results table
+#                   and price estimates. The results stay in results/, and `report` shows them.
+# price_input       US dollars for a million input tokens, for the price estimates in the
+# price_output      README. Leave them out for a local model.
+# effort            anthropic only: low, medium or high. Leave it out for the model's default.
+# trials            trials for this chooser. Leave it out for the trials of the run.
+# max_requests      stop this chooser after this many requests
+# max_input_tokens  stop this chooser after this many input tokens
+#
+# Each answer must say that the model asked for answered it, or the run stops. So pin a
+# version where the API has versions.
+
+[chooser."jev-1.13"]
+label = "Jev 1.13"
+protocol = "jev"
+model = "jev-1.13.0"
+api_base = "https://api.typesafe.ai/v1"
+api_key_env = "TYPESAFE_API_KEY"
+price_input = 0.042
+price_output = 0
+max_requests = 200000
+max_input_tokens = 714000000        # $30
+
+[chooser.luna]
+label = "GPT-6 Luna (Decisions)"
+protocol = "openai"
+model = "gpt-6-luna"
+api_key_env = "OPENAI_API_KEY"
+price_input = 0.10
+price_output = 0
+max_requests = 200000
+max_input_tokens = 300000000        # $30
+
+# Perplexity's Decisions API serves Jev's protocol at /v1/decisions.
+[chooser.pplx-decider]
+label = "pplx-decider 1.1"
+protocol = "jev"
+model = "pplx-decider-v1.1-27b"
+api_base = "https://api.perplexity.ai/v1"
+endpoint = "decisions"
+api_key_env = "PERPLEXITY_API_KEY"
+price_input = 0.02
+price_output = 0
+max_requests = 200000
+max_input_tokens = 1500000000       # $30
+
+# Cloudflare's Clef and Clef-flash on Workers AI serve Jev's protocol, at the name of the
+# model. The API answers with the name of the model and no version, so the run cannot pin
+# a version. The account ID is a value in .env, as is the token. The API rejects an option
+# name that holds "/", so the 8-puzzle rows are divided by "|" for Clef.
+[chooser.clef]
+label = "Clef"
+protocol = "jev"
+model = "clef"
+api_base = "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/cloudflare"
+endpoint = "clef"
+replace = { "/" = "|" }
+api_key_env = "CLOUDFLARE_API_TOKEN"
+price_input = 0.24
+price_output = 0
+max_requests = 200000
+max_input_tokens = 125000000        # $30
+
+[chooser.clef-flash]
+label = "Clef-flash"
+protocol = "jev"
+model = "clef-flash"
+api_base = "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/cloudflare"
+endpoint = "clef-flash"
+replace = { "/" = "|" }
+api_key_env = "CLOUDFLARE_API_TOKEN"
+price_input = 0.09
+price_output = 0
+max_requests = 200000
+max_input_tokens = 333000000        # $30
+
+# A general LLM, for reference. It can reason before it answers, and the choice models
+# cannot, so the README leaves it out. Its full run is also expensive.
+[chooser.haiku]
+label = "Claude Haiku 4.5"
+publish = false
+protocol = "anthropic"
+model = "claude-haiku-4-5"
+api_key_env = "ANTHROPIC_API_KEY"
+price_input = 1.0
+price_output = 5.0
+trials = 5
+max_requests = 100000
+max_input_tokens = 48000000         # about $48
+
+# Local models. Their model cards (huggingface.co/Cloudflare/clef,
+# huggingface.co/Cloudflare/clef-flash) give a Python function, systemone.
+# `python -m beelinebench.serve` puts it on a port. See "Run Clef" in README.md.
+
+[chooser.local]
+label = "Local model"
+protocol = "jev"
+model = "local"
+api_base = "http://localhost:8000/v1"
+max_requests = 200000
+max_input_tokens = 1000000000
+
+[chooser.clef-local]
+label = "Clef (local)"
+protocol = "jev"
+model = "clef"
+api_base = "http://localhost:8001/v1"
+max_requests = 200000
+max_input_tokens = 1000000000
+
+[chooser.clef-flash-local]
+label = "Clef-flash (local)"
+protocol = "jev"
+model = "clef-flash"
+api_base = "http://localhost:8002/v1"
+max_requests = 200000
+max_input_tokens = 1000000000
+
+# A benchmark for an experiment has the form of a table of benchmarks.toml, and a
+# name that is not official. A run of it matches an official benchmark only if its
+# rules and domain settings are the same.
+#
+# [benchmark.deeper-tiles]
+# trials = 5
+# max_expansions = 2500
+# max_frontier = 255
+# # [benchmark.deeper-tiles.domains.tiles]
+# heuristic = "manhattan"
+# scramble = 16

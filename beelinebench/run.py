@@ -1,0 +1,280 @@
+"""Measure one instance, keep the records, and score a domain.
+
+The rules come from a :class:`~beelinebench.benchmark.Benchmark`:
+
+* The classic arm runs best-first search with :func:`~beelinebench.search.lowest` over
+  the heuristic of the domain. The model arm runs the same search with the model
+  as the chooser. Each arm stops at ``max_expansions``, solved or not.
+* A breadth-first search finds the shortest path. The score of an arm is
+  :func:`~beelinebench.search.efficiency`: the explorations of a perfect search
+  (``shortest_path + 1``) divided by the explorations of the arm. 1.0 is perfect.
+* An oracle arm runs the same search with the true distance to the goal as the
+  chooser. Its score is the best that the frontier cap allows, and can be below 1.0.
+* ``path_score`` is the shortest path divided by the path that the model arm found.
+* An arm that stops unsolved counts at ``max_expansions``. When the model arm
+  stops unsolved, the record is ``censored`` (marked ``*``), and the true score
+  is lower. When the classic arm stops unsolved, ``baseline_solved`` is false
+  (marked ``†``), and the true heuristic score is lower.
+* The score of a domain is the geometric mean of the scores of its instances.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from collections.abc import Callable
+from datetime import datetime, timezone
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+from .benchmark import Benchmark
+from .rng import Draws
+from .search import (Chooser, Problem, Spend, best_first, distances_to_goal, efficiency,
+                     lowest, oracle)
+
+
+@dataclass(frozen=True)
+class Record:
+    #: The official benchmark that the run matched, or ``custom-<name>``.
+    benchmark: str
+    chooser: str
+    model: str
+    domain: str
+    heuristic: str
+    trial: int
+    baseline_expansions: int
+    baseline_solved: bool
+    model_expansions: int | None
+    model_solved: bool | None
+    #: The model arm stopped at ``max_expansions`` unsolved.
+    censored: bool | None
+    #: The fewest moves from the start to a solved state.
+    shortest_path: int
+    oracle_expansions: int
+    #: The efficiency of each arm: ``(shortest_path + 1) / expansions``.
+    score: float | None
+    baseline_score: float
+    oracle_score: float
+    baseline_path_length: int | None
+    model_path_length: int | None
+    #: ``shortest_path / model_path_length``, when the model arm solved.
+    path_score: float | None
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    invalid_answers: int
+    # The fields below came after the first records, so they have defaults, and an
+    # older record still reads.
+    #: When the model arm started and ended, in UTC.
+    started_utc: str | None = None
+    finished_utc: str | None = None
+    #: The models that the API says answered. A hosted name can change its model.
+    served_models: tuple[str, ...] = ()
+    #: The time of each request of the model arm, from send to answer.
+    latencies_ms: tuple[int, ...] = ()
+    #: Answers that refused the question. ``requests`` includes the requests asked again.
+    refusals: int = 0
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+#: Gets the arm ("classic" or "model"), the explorations, the cap of the arm and
+#: the size of the frontier, after each exploration.
+Observer = Callable[[str, int, int, int], None]
+
+
+def baseline(problem: Problem, rules: Benchmark, observe: Observer | None = None):
+    def step(expansions: int, frontier: int) -> None:
+        if observe is not None:
+            observe("classic", expansions, rules.max_expansions, frontier)
+
+    return best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
+                      choose=lowest(problem.heuristic),
+                      max_expansions=rules.max_expansions,
+                      max_frontier=rules.max_frontier,
+                      evict=Draws(problem.domain, problem.trial, "evict", "classic"),
+                      observe=step)
+
+
+def shortest(problem: Problem) -> dict:
+    """The distance of each state to the goal. An error when the start reaches no goal."""
+    distance = distances_to_goal(start=problem.start, moves=problem.moves, solved=problem.solved)
+    if problem.start not in distance:
+        raise ValueError(f"{problem.domain} trial {problem.trial} has no solution")
+    return distance
+
+
+def best(problem: Problem, rules: Benchmark, distance: dict):
+    """The oracle arm: the search that the frontier cap allows with a perfect chooser."""
+    return best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
+                      choose=oracle(distance), max_expansions=rules.max_expansions,
+                      max_frontier=rules.max_frontier,
+                      evict=Draws(problem.domain, problem.trial, "evict", "oracle"))
+
+
+def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
+            chooser: str, model: str, spend: Spend,
+            observe: Observer | None = None) -> Record:
+    """Run both arms on ``problem`` under ``rules``. ``spend`` is what ``choose`` adds to.
+
+    ``label`` is the official benchmark that the run matches, or ``custom-<name>``.
+    ``chooser`` is the name in ``beelinebench.toml``. ``model`` is the model name, and
+    it seeds the random draws of the model arm.
+    """
+    distance = shortest(problem)
+    d = distance[problem.start]
+    perfect = best(problem, rules, distance)
+    classic = baseline(problem, rules, observe)
+    before = Spend(**{k: v for k, v in vars(spend).items()
+                      if k not in ("latencies_ms", "served")})
+    first = len(spend.latencies_ms)
+    started = now()
+    cap = rules.max_expansions
+
+    def step(expansions: int, frontier: int) -> None:
+        if observe is not None:
+            observe("model", expansions, cap, frontier)
+
+    outcome = best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
+                         choose=choose, max_expansions=cap,
+                         max_frontier=rules.max_frontier,
+                         evict=Draws(problem.domain, problem.trial, "evict", "model", model),
+                         observe=step)
+    return Record(
+        benchmark=label, chooser=chooser, model=model, domain=problem.domain,
+        heuristic=problem.heuristic_name, trial=problem.trial,
+        baseline_expansions=classic.expansions, baseline_solved=classic.solved,
+        model_expansions=outcome.expansions, model_solved=outcome.solved,
+        censored=not outcome.solved,
+        shortest_path=d, oracle_expansions=perfect.expansions,
+        score=efficiency(d, outcome.expansions),
+        baseline_score=efficiency(d, classic.expansions),
+        oracle_score=efficiency(d, perfect.expansions),
+        baseline_path_length=classic.path_length,
+        model_path_length=outcome.path_length,
+        path_score=d / outcome.path_length if outcome.solved else None,
+        requests=spend.requests - before.requests,
+        input_tokens=spend.input_tokens - before.input_tokens,
+        output_tokens=spend.output_tokens - before.output_tokens,
+        invalid_answers=spend.invalid_answers - before.invalid_answers,
+        refusals=spend.refusals - before.refusals,
+        started_utc=started, finished_utc=now(),
+        served_models=tuple(sorted(set(spend.served[first:]))),
+        latencies_ms=tuple(spend.latencies_ms[first:]))
+
+
+def results_file(results: Path, label: str, chooser: str, problem: Problem) -> Path:
+    """One file for each benchmark, chooser, domain and heuristic."""
+    return results / label / chooser / f"{problem.domain}.{problem.heuristic_name}.jsonl"
+
+
+def read(path: Path) -> list[Record]:
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8") as lines:
+        return [Record(**json.loads(line)) for line in lines if line.strip()]
+
+
+def append(path: Path, record: Record) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as out:
+        out.write(json.dumps(asdict(record)) + "\n")
+
+
+@dataclass(frozen=True)
+class Summary:
+    """The scores of one file. Each is a geometric mean over the trials.
+
+    A trial that an arm did not solve counts at ``max_expansions`` for that arm.
+    ``censored`` counts the trials where the model arm did not solve (``*``): the
+    true score is lower. ``baseline_censored`` counts those where the classic arm
+    did not solve (``†``): the true heuristic score is lower. ``solved_score`` and
+    ``path_score`` are over the trials the model solved, and ``coverage`` is their
+    share.
+    """
+
+    instances: int
+    censored: int
+    baseline_censored: int
+    score: float | None
+    #: The 95% bootstrap interval of the geometric mean.
+    low: float | None
+    high: float | None
+    coverage: float | None
+    solved_score: float | None
+    baseline_score: float | None
+    oracle_score: float | None
+    path_score: float | None
+    requests: int
+    #: Answers that refused the question, out of ``requests``.
+    refusals: int
+    input_tokens: int
+    output_tokens: int
+    #: The median and the 95th percentile of the time of a request.
+    latency_ms_median: float | None
+    latency_ms_p95: float | None
+    served_models: tuple[str, ...]
+    #: The first and the last time a model arm ran, in UTC.
+    first_utc: str | None
+    last_utc: str | None
+
+    @property
+    def refusal_rate(self) -> str:
+        """The share of requests that the model refused, for a table."""
+        return f"{self.refusals / self.requests:.1%}" if self.requests else "—"
+
+    @property
+    def marks(self) -> str:
+        """``*`` when a model run hit the limit."""
+        return "*" if self.censored else ""
+
+    @property
+    def baseline_marks(self) -> str:
+        """``†`` when a classic run hit the limit."""
+        return "†" if self.baseline_censored else ""
+
+
+def geometric_mean(values: list[float]) -> float | None:
+    return math.exp(sum(math.log(v) for v in values) / len(values)) if values else None
+
+
+def interval(values: list[float], draws: Draws) -> tuple[float, float]:
+    """The 95% bootstrap interval of the geometric mean of ``values``."""
+    logs = [math.log(v) for v in values]
+    means = sorted(sum(draws.choice(logs) for _ in logs) / len(logs) for _ in range(2000))
+    return math.exp(means[49]), math.exp(means[1949])
+
+
+def summarise(records: list[Record], *, draws: Draws) -> Summary:
+    scored = [r for r in records if r.score is not None]
+    logs = [math.log(r.score) for r in scored]
+    latencies = sorted(ms for r in records for ms in r.latencies_ms)
+    times = sorted(t for r in records for t in (r.started_utc, r.finished_utc) if t)
+    context = dict(
+        requests=sum(r.requests for r in records),
+        refusals=sum(r.refusals for r in records),
+        input_tokens=sum(r.input_tokens for r in records),
+        output_tokens=sum(r.output_tokens for r in records),
+        latency_ms_median=latencies[len(latencies) // 2] if latencies else None,
+        latency_ms_p95=latencies[min(len(latencies) - 1, int(0.95 * len(latencies)))]
+        if latencies else None,
+        served_models=tuple(sorted({m for r in records for m in r.served_models})),
+        first_utc=times[0] if times else None, last_utc=times[-1] if times else None)
+    if not logs:
+        return Summary(0, 0, 0, None, None, None, None, None, None, None, None, **context)
+    solved = [r.score for r in scored if not r.censored]
+    low, high = interval([r.score for r in scored], draws)
+    return Summary(
+        instances=len(scored),
+        censored=sum(1 for r in scored if r.censored),
+        baseline_censored=sum(1 for r in scored if not r.baseline_solved),
+        score=math.exp(sum(logs) / len(logs)),
+        low=low, high=high,
+        coverage=len(solved) / len(scored),
+        solved_score=geometric_mean(solved),
+        baseline_score=geometric_mean([r.baseline_score for r in scored]),
+        oracle_score=geometric_mean([r.oracle_score for r in scored]),
+        path_score=geometric_mean([r.path_score for r in scored if r.path_score is not None]),
+        **context)

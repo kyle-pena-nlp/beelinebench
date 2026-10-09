@@ -1,0 +1,20 @@
+# Checks the docs of the benchmarks and the README, and runs the tests. It runs no benchmark and
+# needs no key: the tests put plain functions in the place of the models.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --extra llm
+      - name: every official benchmark has a page and a link
+        run: uv run python -m beelinebench check-docs
+      - name: README.md is what README.template.md and the results make
+        run: uv run python -m beelinebench readme --check
+      - run: uv run pytest
