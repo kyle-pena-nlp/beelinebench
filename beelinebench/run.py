@@ -78,6 +78,27 @@ class Record:
     #: each model, because its draws come from the domain and the trial only.
     random_expansions: int | None = None
     random_score: float | None = None
+    #: Tries of a request that failed with an intermittent error before the answer.
+    retries: int = 0
+
+
+def troubles(record: Record) -> int:
+    """The intermittent errors of a trial: refusals, invalid answers, and retries.
+
+    A trial with none is clean. A re-run replaces a trial only if it has fewer.
+    """
+    return record.refusals + record.invalid_answers + record.retries
+
+
+def takes_place(old: Record, new: Record, *, old_has_trace: bool, retrace: bool) -> bool:
+    """Whether a re-run's result takes the place of the old result of the same trial.
+
+    A re-run made for a trace replaces an old result with no trace. Otherwise the new
+    result must have fewer intermittent errors. The score has no part in the choice.
+    """
+    if retrace and not old_has_trace:
+        return True
+    return troubles(new) < troubles(old)
 
 
 def now() -> str:
@@ -148,7 +169,7 @@ class Tracer:
     def counters(self) -> tuple:
         s = self.spend
         return (s.requests, s.input_tokens, s.output_tokens, s.refusals, s.invalid_answers,
-                len(s.latencies_ms))
+                len(s.latencies_ms), s.retries)
 
     def __call__(self, states: list, index: int, state, forced: bool) -> None:
         far = lambda s: self.distance.get(s)  # None: no way to the goal from s
@@ -163,7 +184,7 @@ class Tracer:
                 "regret": None if chosen is None or best is None else chosen - best,
                 "requests": now[0] - before[0], "input_tokens": now[1] - before[1],
                 "output_tokens": now[2] - before[2], "refusals": now[3] - before[3],
-                "invalid_answers": now[4] - before[4],
+                "invalid_answers": now[4] - before[4], "retries": now[6] - before[6],
                 "latencies_ms": self.spend.latencies_ms[before[5]:now[5]]}
         probabilities = None if forced else self.spend.probabilities
         if probabilities is not None and len(probabilities) == len(states):
@@ -249,6 +270,7 @@ def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
         output_tokens=spend.output_tokens - before.output_tokens,
         invalid_answers=spend.invalid_answers - before.invalid_answers,
         refusals=spend.refusals - before.refusals,
+        retries=spend.retries - before.retries,
         started_utc=started, finished_utc=now(),
         served_models=tuple(sorted(set(spend.served[first:]))),
         latencies_ms=tuple(spend.latencies_ms[first:]))

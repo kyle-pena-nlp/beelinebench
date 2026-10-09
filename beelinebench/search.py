@@ -64,6 +64,12 @@ def check(spend: "Spend") -> None:
     if wallet is not None and wallet.cost >= wallet.max_cost:
         raise BudgetExhausted(f"${wallet.cost:.2f} spent on this model in all, and the limit is "
                               f"${wallet.max_cost:.2f}")
+    limit = wallet.total_limit() if wallet is not None else None
+    if limit is not None:
+        total = wallet.total()
+        if total >= limit:
+            raise BudgetExhausted(f"${total:.2f} spent on all models, and the limit is "
+                                  f"${limit:.2f}")
 
 
 @dataclass
@@ -79,6 +85,13 @@ class Wallet:
     price_input: float
     price_output: float
     max_cost: float
+    #: The most that all models together may cost: the sum of the wallets in the folder of
+    #: ``path``. ``None`` for no limit. Each run reads the other files, so the limit holds
+    #: for runs that go at the same time.
+    max_total: float | None = None
+    #: Gives the limit of all models now, so that a run uses a new limit with no restart.
+    #: ``None`` uses ``max_total``.
+    read_limit: Callable[[], float | None] | None = field(default=None, repr=False)
     input_tokens: int = 0
     output_tokens: int = 0
     requests: int = 0
@@ -88,14 +101,34 @@ class Wallet:
         return (self.input_tokens * self.price_input
                 + self.output_tokens * self.price_output) / 1e6
 
+    def total_limit(self) -> float | None:
+        if self.read_limit is not None:
+            try:
+                return self.read_limit()
+            except Exception:  # a file in the middle of an edit: keep the last limit
+                pass
+        return self.max_total
+
+    def total(self) -> float:
+        """The cost of all models: this wallet, and the other wallet files in its folder."""
+        others = 0.0
+        for path in self.path.parent.glob("*.json"):
+            if path != self.path:
+                try:
+                    others += json.loads(path.read_text())["cost_usd"]
+                except (OSError, ValueError, KeyError):
+                    pass  # a file that another run writes at this moment
+        return self.cost + others
+
     @classmethod
     def open(cls, path: Path, *, price_input: float, price_output: float, max_cost: float,
-             start: tuple[int, int, int]) -> "Wallet":
+             start: tuple[int, int, int], max_total: float | None = None) -> "Wallet":
         """The wallet in ``path``. A new one starts at ``start``: input tokens, output tokens, requests."""
         if path.exists():
             saved = json.loads(path.read_text())
             start = (saved["input_tokens"], saved["output_tokens"], saved["requests"])
-        wallet = cls(path, price_input, price_output, max_cost, *start)
+        wallet = cls(path, price_input, price_output, max_cost, max_total=max_total,
+                     input_tokens=start[0], output_tokens=start[1], requests=start[2])
         wallet.save()
         return wallet
 
@@ -136,6 +169,8 @@ class Spend:
     invalid_answers: int = 0
     #: Answers that refused the question. A chooser can ask again.
     refusals: int = 0
+    #: Tries of a request that failed with an intermittent error before the answer.
+    retries: int = 0
     latencies_ms: list[int] = field(default_factory=list)
     served: list[str] = field(default_factory=list)
     #: The total cost of the model over all runs, and its limit. ``None`` for no limit.
@@ -145,8 +180,9 @@ class Spend:
     probabilities: list[float] | None = None
 
     def add(self, *, input_tokens: int, output_tokens: int, seconds: float,
-            served: str) -> None:
-        """Count one request."""
+            served: str, retries: int = 0) -> None:
+        """Count one request, and the tries of it that failed before its answer."""
+        self.retries += retries
         if self.wallet is not None:
             self.wallet.add(input_tokens, output_tokens)
         self.requests += 1

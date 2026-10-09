@@ -29,7 +29,11 @@ from .rng import Draws
 from .search import Chooser, ChooserError, Spend, check
 
 MAX_OPTIONS = 255
-RETRY_STATUS = {429, 500, 502, 503, 504, 529}
+#: A request with one of these statuses, or any 5xx status, is tried again.
+RETRY_STATUS = {408, 429}
+#: Tries of one request in all, and the most seconds to wait between two tries.
+ATTEMPTS = 8
+MAX_WAIT = 120.0
 
 TASK = (
     "A search is looking for a way to reach `goal`. Each option in the question is "
@@ -46,25 +50,39 @@ class JevError(ChooserError):
     """A Jev request failed, or a model other than the one asked for answered it."""
 
 
-def post(http: httpx.Client, url: str, body: dict, headers: dict, *,
-         error: type[ChooserError], served: str | None = None) -> tuple[dict, float]:
-    """POST ``body``, with retries. Give the response body and the seconds of the answered try.
+def wait(attempt: int, response: httpx.Response | None = None) -> float:
+    """Seconds to wait before the next try: the API's ``Retry-After``, or 1, 2, 4 ... 60."""
+    if response is not None:
+        try:
+            return min(MAX_WAIT, max(0.0, float(response.headers.get("retry-after", ""))))
+        except ValueError:
+            pass
+    return min(60.0, 2.0 ** attempt)
 
-    A timeout, a dropped connection, or a status of RETRY_STATUS is tried again, five
-    times in all.
+
+def post(http: httpx.Client, url: str, body: dict, headers: dict, *,
+         error: type[ChooserError], served: str | None = None) -> tuple[dict, float, int]:
+    """POST ``body``, with retries. Give the response body, the seconds of the answered try,
+    and the number of tries before it (the retries).
+
+    An intermittent error is tried again, ``ATTEMPTS`` times in all, with a wait that
+    grows to a minute or two: a timeout, a dropped connection, a 408 or 429 status, or a
+    5xx status. The API's ``Retry-After`` sets the wait when it gives one. A 429 for an
+    account with no credits is not intermittent, and stops at once.
 
     The response must say that ``served`` answered, or ``body["model"]`` when ``served``
     is ``None``. Any other model, or no model, is an ``error``. OpenRouter, for example,
     takes ``liquid/d1`` and answers with the dated name ``liquid/d1-20260930``.
     """
-    for attempt in range(5):
+    last = ATTEMPTS - 1
+    for attempt in range(ATTEMPTS):
         started = time.monotonic()
         try:
             response = http.post(url, json=body, headers=headers)
         except httpx.TransportError as exc:  # a timeout, or a dropped connection
-            if attempt == 4:
+            if attempt == last:
                 raise error(f"{url} did not answer: {type(exc).__name__}: {exc}") from exc
-            time.sleep(min(8.0, 0.5 * 2**attempt))
+            time.sleep(wait(attempt))
             continue
         if response.status_code < 400:
             seconds = time.monotonic() - started
@@ -76,14 +94,15 @@ def post(http: httpx.Client, url: str, body: dict, headers: dict, *,
             if answered != expected:
                 raise error(f"asked for model {expected!r}, and the API says "
                             f"{answered!r} answered")
-            return payload, seconds
+            return payload, seconds, attempt
         # A 429 is usually "slow down". OpenAI also sends it when the account has no
         # credits, and Cloudflare when the free allocation of the day is used up.
         out_of_credits = response.status_code == 429 and any(
             sign in response.text for sign in ("insufficient_quota", "free allocation"))
-        if response.status_code not in RETRY_STATUS or out_of_credits or attempt == 4:
+        intermittent = response.status_code in RETRY_STATUS or response.status_code >= 500
+        if not intermittent or out_of_credits or attempt == last:
             raise error(f"{url} returned {response.status_code}: {response.text[:300]}")
-        time.sleep(min(8.0, 0.5 * 2**attempt))
+        time.sleep(wait(attempt, response))
     raise AssertionError("not reached")
 
 
@@ -93,6 +112,8 @@ class Reply(NamedTuple):
     #: The model that the API says answered. It is always the model asked for.
     served: str
     seconds: float
+    #: The tries that failed with an intermittent error before the answer.
+    retries: int = 0
 
 
 class JevClient:
@@ -125,11 +146,11 @@ class JevClient:
         ``seconds`` is the time of the attempt that was answered.
         """
         body = {"model": self.model, "state": state, "questions": questions}
-        payload, seconds = post(self.http, self.url, body, self.headers, error=JevError,
-                                served=self.served)
+        payload, seconds, retries = post(self.http, self.url, body, self.headers,
+                                         error=JevError, served=self.served)
         usage = payload.get("usage") or {}
         return Reply(payload["answers"], int(usage.get("input_tokens", 0)), payload["model"],
-                     seconds)
+                     seconds, retries)
 
 
 def jev_chooser(client: JevClient, *, objective: str, context: str,
@@ -164,7 +185,7 @@ def jev_chooser(client: JevClient, *, objective: str, context: str,
             "type": "choice", "instructions": INSTRUCTIONS,
             "criteria": {label: None for label in shuffled}}})
         spend.add(input_tokens=reply.input_tokens, output_tokens=0,
-                  seconds=reply.seconds, served=reply.served)
+                  seconds=reply.seconds, served=reply.served, retries=reply.retries)
         probabilities = reply.answers["choose"]["probabilities"]
         spend.probabilities = [float(probabilities.get(label, 0.0)) for label in labels]
         return max(range(len(labels)), key=lambda i: spend.probabilities[i])

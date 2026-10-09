@@ -4,7 +4,7 @@ from beelinebench.domains import tiles, wikispeedia
 def test_tiles():
     assert tiles.manhattan(tiles.SOLVED) == 0
     assert len(list(tiles.slide(tiles.SOLVED))) == 2
-    assert tiles.line(tiles.SOLVED) == "1 2 3 / 4 5 6 / 7 8 ·"
+    assert tiles.line(tiles.SOLVED) == "1 2 3 | 4 5 6 | 7 8 ·"
     assert tiles.problem(3, heuristic="manhattan", scramble=12).start == tiles.problem(3, heuristic="manhattan", scramble=12).start
     assert tiles.problem(3, heuristic="manhattan", scramble=12).start != tiles.problem(4, heuristic="manhattan", scramble=12).start
 

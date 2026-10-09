@@ -192,3 +192,55 @@ def test_replace_puts_a_record_in_place_of_the_same_trial(tmp_path):
     append(path, changed(base, trial=2))
     replace(path, changed(base, score=0.25))
     assert [(r.trial, r.score) for r in read(path)] == [(1, 0.25), (2, 0.5)]
+
+
+def test_a_rerun_takes_the_place_of_a_trial_only_with_fewer_intermittent_errors():
+    from dataclasses import replace as changed
+
+    from beelinebench.run import Record, takes_place
+
+    old = Record(benchmark="t", chooser="m", model="m", domain="d", heuristic="h", trial=1,
+                 baseline_expansions=1, baseline_solved=True, model_expansions=1,
+                 model_solved=True, censored=False, shortest_path=1, oracle_expansions=2,
+                 score=0.9, baseline_score=0.5, oracle_score=1.0, baseline_path_length=1,
+                 model_path_length=1, path_score=1.0, requests=10, input_tokens=0,
+                 output_tokens=0, invalid_answers=0, refusals=3)
+    cleaner_but_worse = changed(old, refusals=0, retries=1, score=0.1)
+    as_unclean_but_better = changed(old, refusals=2, invalid_answers=1, score=1.0)
+    assert takes_place(old, cleaner_but_worse, old_has_trace=True, retrace=False)
+    assert not takes_place(old, as_unclean_but_better, old_has_trace=True, retrace=False)
+    # A run for a missing trace replaces the old result, so the two are of one run.
+    assert takes_place(old, as_unclean_but_better, old_has_trace=False, retrace=True)
+
+
+def test_the_total_limit_counts_the_wallets_of_all_models(tmp_path):
+    import json
+
+    import pytest
+
+    from beelinebench.search import BudgetExhausted, Wallet, check
+
+    (tmp_path / "other.json").write_text(json.dumps({"cost_usd": 4.0}))
+    wallet = Wallet.open(tmp_path / "m.json", price_input=1.0, price_output=0.0, max_cost=100.0,
+                         start=(0, 0, 0), max_total=5.0)
+    spend = Spend(max_requests=100, max_input_tokens=10**9, wallet=wallet)
+    check(spend)
+    spend.add(input_tokens=1_000_000, output_tokens=0, seconds=0.1, served="m")  # $1 more
+    with pytest.raises(BudgetExhausted, match=r"\$5.00 spent on all models"):
+        check(spend)
+
+
+def test_a_run_uses_a_new_total_limit_with_no_restart(tmp_path):
+    import pytest
+
+    from beelinebench.search import BudgetExhausted, Wallet, check
+
+    limit = {"now": 0.5}
+    wallet = Wallet.open(tmp_path / "m.json", price_input=1.0, price_output=0.0, max_cost=100.0,
+                         start=(1_000_000, 0, 1), max_total=0.5)  # $1 spent
+    wallet.read_limit = lambda: limit["now"]
+    spend = Spend(max_requests=100, max_input_tokens=10**9, wallet=wallet)
+    with pytest.raises(BudgetExhausted):
+        check(spend)
+    limit["now"] = 2.0
+    check(spend)

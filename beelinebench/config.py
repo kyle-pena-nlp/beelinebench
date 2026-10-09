@@ -65,6 +65,8 @@ class RunConfig:
     trials: int | None
     #: The most that one model may cost in all runs, in US dollars. ``None`` for no limit.
     max_cost: float | None = None
+    #: The most that all models together may cost. ``None`` for no limit.
+    max_total_cost: float | None = None
 
 
 @dataclass(frozen=True)
@@ -103,7 +105,8 @@ def load(path: Path, officials: dict[str, Benchmark]) -> Config:
     return Config(
         run=RunConfig(benchmark=run["benchmark"], choosers=tuple(run.get("choosers", ())),
                       domains=tuple(run["domains"]) if "domains" in run else None,
-                      trials=run.get("trials"), max_cost=run.get("max_cost")),
+                      trials=run.get("trials"), max_cost=run.get("max_cost"),
+                      max_total_cost=run.get("max_total_cost")),
         choosers=choosers, benchmarks=customs)
 
 

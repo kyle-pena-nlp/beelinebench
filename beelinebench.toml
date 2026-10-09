@@ -7,6 +7,7 @@ choosers = ["jev-1.13", "luna", "pplx-decider", "pplx-decider-1", "d1", "kev-4b"
             "mercury-decide", "clef", "clef-flash"]   # one after the other
 # domains = ["tiles", "countdown"]     # leave out for every domain of the benchmark
 # trials = 5                        # leave out for the trials of the benchmark
+max_total_cost = 80.0               # US dollars: the most all models together may cost.
 max_cost = 25.0                     # US dollars: the most one model may cost in all runs.
                                     # .spend/<chooser>.json holds each total. A chooser can
                                     # set its own max_cost.
@@ -137,15 +138,13 @@ max_input_tokens = 1500000000       # $30
 
 # Cloudflare's Clef and Clef-flash on Workers AI serve Jev's protocol, at the name of the
 # model. The API answers with the name of the model and no version, so the run cannot pin
-# a version. The account ID is a value in .env, as is the token. The API rejects an option
-# name that holds "/", so the 8-puzzle rows are divided by "|" for Clef.
+# a version. The account ID is a value in .env, as is the token.
 [chooser.clef]
 label = "Clef"
 protocol = "jev"
 model = "clef"
 api_base = "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/cloudflare"
 endpoint = "clef"
-replace = { "/" = "|" }
 api_key_env = "CLOUDFLARE_API_TOKEN"
 price_input = 0.24
 price_output = 0
@@ -158,7 +157,6 @@ protocol = "jev"
 model = "clef-flash"
 api_base = "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/cloudflare"
 endpoint = "clef-flash"
-replace = { "/" = "|" }
 api_key_env = "CLOUDFLARE_API_TOKEN"
 price_input = 0.09
 price_output = 0

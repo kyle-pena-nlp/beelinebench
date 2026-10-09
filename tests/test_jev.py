@@ -218,3 +218,24 @@ def test_a_chooser_can_name_the_dated_model_that_must_answer():
         client("liquid/d1-20260931").ask({}, {})
     with pytest.raises(JevError, match="asked for model 'liquid/d1'"):
         client(None).ask({}, {})
+
+
+def test_a_429_waits_for_retry_after_and_counts_the_retries(monkeypatch):
+    import beelinebench.jev as jev
+
+    waits = []
+    monkeypatch.setattr(jev.time, "sleep", waits.append)
+    calls = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"Retry-After": "7"}, json={})
+        if len(calls) == 2:
+            return httpx.Response(503, json={})
+        return httpx.Response(200, json={"model": "m", "answers": {}, "usage": {}})
+
+    client = JevClient(api_key="k", model="m", api_base="https://example.test/v1",
+                       http=httpx.Client(transport=httpx.MockTransport(answer)))
+    reply = client.ask({}, {})
+    assert reply.retries == 2 and waits == [7.0, 2.0]

@@ -53,10 +53,11 @@ class DecisionsClient:
     def ask(self, text: str, questions: list[dict]) -> Reply:
         """Send one request. ``answers`` maps each question name to its answer."""
         body = {"model": self.model, "input": text, "questions": questions}
-        payload, seconds = post(self.http, self.url, body, self.headers, error=DecisionsError)
+        payload, seconds, retries = post(self.http, self.url, body, self.headers,
+                                         error=DecisionsError)
         usage = payload.get("usage") or {}
         return Reply({answer["name"]: answer for answer in payload["answers"]},
-                     int(usage.get("input_tokens", 0)), payload["model"], seconds)
+                     int(usage.get("input_tokens", 0)), payload["model"], seconds, retries)
 
 
 def decisions_chooser(client: DecisionsClient, *, objective: str, context: str,
@@ -79,7 +80,7 @@ def decisions_chooser(client: DecisionsClient, *, objective: str, context: str,
                                        "instructions": INSTRUCTIONS,
                                        "choices": [{"value": label} for label in shuffled]}])
             spend.add(input_tokens=reply.input_tokens, output_tokens=0,
-                      seconds=reply.seconds, served=reply.served)
+                      seconds=reply.seconds, served=reply.served, retries=reply.retries)
             answer = reply.answers.get("choose", {})
             if answer.get("type") == "choice" and "probabilities" in answer:
                 break

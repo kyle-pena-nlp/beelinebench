@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import tomllib
 import functools
 import io
 import tarfile
@@ -45,7 +46,8 @@ from .benchmark import Benchmark
 from .domains import blocksworld, countdown, rush_hour, tiles, wikispeedia, word_ladder
 from .rng import Draws
 from .run import (Record, append, baseline, best, geometric_mean, measure, read, replace,
-                  results_file, shortest, summarise, trace_file, wander)
+                  results_file, shortest, summarise, takes_place, trace_file, troubles,
+                  wander)
 from .search import BudgetExhausted, ChooserError, Problem, Spend, Wallet, efficiency
 
 PROJECT = Path(__file__).resolve().parent.parent
@@ -162,39 +164,51 @@ def run(args: argparse.Namespace) -> None:
                                max_requests=args.max_requests or chooser.max_requests,
                                max_input_tokens=args.max_input_tokens or chooser.max_input_tokens,
                                max_cost=chooser.max_cost or cfg.run.max_cost,
-                               retrace=args.retrace)
+                               max_total=cfg.run.max_total_cost,
+                               retrace=args.retrace, rerun_unclean=args.rerun_unclean)
         show_match(chooser.name, chosen, label, domains, officials, finished)
 
 
 def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
                 domains: list[str], trials: int, *, max_requests: int,
                 max_input_tokens: int, max_cost: float | None = None,
-                retrace: bool = False) -> bool:
+                max_total: float | None = None,
+                retrace: bool = False, rerun_unclean: bool = False) -> bool:
     """Run one chooser over ``domains``. False when it stopped at a limit.
 
     Each trial writes a trace. With ``retrace``, a trial that has a result and no
     trace runs again, and its new result takes the place of the old one, so that the
     result and the trace are of the same run.
 
+    With ``rerun_unclean``, a trial with intermittent errors (refusals, invalid answers
+    or retries) runs again. The new result and trace take the place of the old ones only
+    if the new run has fewer errors. The score has no part in the choice.
+
     With ``max_cost`` and a price, the run stops before the request that would start
     when the model's cost over all runs is ``max_cost`` or more.
     """
     make_chooser = config.factory(chooser, PROJECT / ".env")
     spend = Spend(max_requests=max_requests, max_input_tokens=max_input_tokens,
-                  wallet=wallet_of(chooser, max_cost))
+                  wallet=wallet_of(chooser, max_cost, max_total))
     if spend.wallet is not None:
         console.print(f"{chooser.name} has cost ${spend.wallet.cost:.2f} in all. "
                       f"The limit is ${spend.wallet.max_cost:.2f}.")
+        if max_total is not None:
+            console.print(f"All models have cost ${spend.wallet.total():.2f}. "
+                          f"The limit is ${max_total:.2f}.")
     with progress() as bars:
         for domain in domains:
             make = maker(domain, chosen.domains[domain])
             path = results_file(RESULTS, label, chooser.name, make(1))
-            recorded = {record.trial for record in read(path)}
+            old = {record.trial: record for record in read(path)}
+            recorded = set(old)
+            traced = {t for t in recorded
+                      if trace_file(TRACES, label, chooser.name, make(t)).exists()}
+            done = set(recorded)
             if retrace:
-                done = {t for t in recorded
-                        if trace_file(TRACES, label, chooser.name, make(t)).exists()}
-            else:
-                done = recorded
+                done &= traced
+            if rerun_unclean:
+                done -= {t for t, r in old.items() if troubles(r) > 0}
             bench = bars.add_task(f"{chooser.name} · {domain}/{make(1).heuristic_name}",
                                   total=trials,
                                   completed=len(done & set(range(1, trials + 1))), status="")
@@ -206,10 +220,15 @@ def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
                 choose = make_chooser(problem, spend,
                                       Draws(domain, trial, "order", chooser.model))
                 try:
+                    trace = trace_file(TRACES, label, chooser.name, problem)
+                    # A re-run writes a candidate trace, which takes the old one's place only
+                    # if the new result does.
+                    target = (trace.with_name(trace.name + ".candidate")
+                              if trial in recorded else trace)
                     record = measure(problem, rules=chosen, label=label, choose=choose,
                                      chooser=chooser.name, model=chooser.model, spend=spend,
                                      observe=watcher(bars, current, trial, spend),
-                                     trace=trace_file(TRACES, label, chooser.name, problem))
+                                     trace=target)
                 except BudgetExhausted:
                     console.print(f"[red]{chooser.name} stopped at {spend.requests:,} requests "
                                   f"and {spend.input_tokens:,} input tokens. "
@@ -219,10 +238,20 @@ def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
                     console.print(f"[red]{chooser.name} stopped: {error}. "
                                   f"{domain} trial {trial} is not recorded.")
                     return False
-                if trial in recorded:
-                    replace(path, record)
-                else:
+                if trial not in recorded:
                     append(path, record)
+                elif takes_place(old[trial], record, old_has_trace=trial in traced,
+                                 retrace=retrace):
+                    replace(path, record)
+                    target.replace(trace)
+                    console.print(f"{domain} trial {trial}: the new run takes the place of the "
+                                  f"old one ({troubles(old[trial])} intermittent errors, now "
+                                  f"{troubles(record)})")
+                else:
+                    target.unlink(missing_ok=True)
+                    console.print(f"{domain} trial {trial}: kept the old run "
+                                  f"({troubles(old[trial])} intermittent errors, the new run "
+                                  f"{troubles(record)})")
                 bars.advance(bench)
                 console.print(line_of(record))
             bars.remove_task(current)
@@ -231,7 +260,8 @@ def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
     return True
 
 
-def wallet_of(chooser: config.ChooserConfig, max_cost: float | None) -> Wallet | None:
+def wallet_of(chooser: config.ChooserConfig, max_cost: float | None,
+              max_total: float | None = None) -> Wallet | None:
     """The cost of ``chooser`` over all runs, with its limit. ``None`` without a price or limit.
 
     A model without a file in .spend/ starts at the tokens of its recorded trials.
@@ -241,8 +271,15 @@ def wallet_of(chooser: config.ChooserConfig, max_cost: float | None) -> Wallet |
     records = [r for path in RESULTS.glob(f"*/{chooser.name}/*.jsonl") for r in read(path)]
     start = (sum(r.input_tokens for r in records), sum(r.output_tokens for r in records),
              sum(r.requests for r in records))
-    return Wallet.open(SPEND / f"{chooser.name}.json", price_input=chooser.price_input,
-                       price_output=chooser.price_output or 0.0, max_cost=max_cost, start=start)
+    wallet = Wallet.open(SPEND / f"{chooser.name}.json", price_input=chooser.price_input,
+                         price_output=chooser.price_output or 0.0, max_cost=max_cost,
+                         start=start, max_total=max_total)
+    # The limit of all models comes from the config at each request, so a new limit there
+    # takes effect in the runs that go now.
+    config_file = PROJECT / "beelinebench.toml"
+    wallet.read_limit = lambda: tomllib.loads(config_file.read_text()).get("run", {}).get(
+        "max_total_cost")
+    return wallet
 
 
 def show_match(chooser: str, chosen: Benchmark, label: str, domains: list[str],
@@ -564,6 +601,10 @@ def main() -> None:
                                  help="in place of the chooser's max_requests")
             command.add_argument("--max-input-tokens", type=int,
                                  help="in place of the chooser's max_input_tokens")
+            command.add_argument("--rerun-unclean", action="store_true",
+                                 help="run again each trial with refusals, invalid answers or "
+                                 "retries. The new run takes the place of the old one only if "
+                                 "it has fewer of them, whatever its score")
             command.add_argument("--retrace", action="store_true",
                                  help="run again each trial that has a result and no trace, "
                                  "and put its new result in place of the old one")

@@ -14,7 +14,7 @@ SOLVED: Board = (1, 2, 3, 4, 5, 6, 7, 8, 0)
 
 CONTEXT = (
     "A state is a 3 by 3 board, written row by row from the top, with the rows "
-    "separated by /. A dot is the gap. A move slides one tile that is next to the "
+    "separated by |. A dot is the gap. A move slides one tile that is next to the "
     "gap into the gap."
 )
 
@@ -46,9 +46,13 @@ def manhattan(board: Board) -> int:
 
 
 def line(board: Board) -> str:
-    """The board on one line, for example ``1 2 3 / 4 5 6 / 7 8 ·``."""
+    """The board on one line, for example ``1 2 3 | 4 5 6 | 7 8 ·``.
+
+    The rows are separated by ``|``, not ``/``: Cloudflare's API rejects an option name
+    that holds ``/``.
+    """
     cells = ["·" if tile == 0 else str(tile) for tile in board]
-    return " / ".join(" ".join(cells[r * 3:r * 3 + 3]) for r in range(3))
+    return " | ".join(" ".join(cells[r * 3:r * 3 + 3]) for r in range(3))
 
 
 OBJECTIVE = f"put the tiles in order, with the gap in the bottom right corner: {line(SOLVED)}"

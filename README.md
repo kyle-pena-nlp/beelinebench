@@ -16,19 +16,19 @@ Scores for benchmark 1.0.0, from the files in `results/1.0.0/`:
 
 ![The score against the cost of a step for each model in benchmark 1.0.0, by domain, with the efficient frontier](docs/benchmarks/1.0.0-frontier.png)
 
-Each panel shows the cost of one step against the score of each model. A step is one request, in which the model chooses one state. The score axis is reversed, so the best models are at the bottom left: a high score and a low cost. The frontier falls from the accurate and expensive models at the top left to the cheap models at the bottom right. A dark diamond is on the efficient frontier: no other model has a higher score and a lower cost. The line joins the models on the frontier. A legend names the models of its panel. An asterisk (*) after a name shows that at least one run of the model did not solve within the limit. The cost of a step does not include the number of steps, so a model with a low score also uses more steps.
+Each panel shows the cost of one step against the score of each model. A step is one request, in which the model chooses one state. The cost axis is reversed, so the best models are at the top right: a high score and a low cost.
 
 ## Introduction
 
 BeelineBench uses the model as the ranker in a best-first search. At each step, the search sends all open states (the frontier) to the model in one request. The search stops when it finds the goal.
 
-Before the search, a breadth-first search finds the shortest path to the goal. A perfect chooser explores only the states of that path, the start and the goal included. The score is the number of nodes that a perfect chooser explores divided by the number of nodes that the model explores:
+Before the search, a breadth-first search finds the shortest possible path to the goal. The score is the number of nodes that a perfect chooser explores divided by the number of nodes that the model explores:
 
 ```
 score = (shortest path + 1) / nodes explored with the model
 ```
 
-A score of 1.0 is perfect. A score of 0.1 means that the model explored ten times as many nodes as necessary. The score of a domain is the geometric mean over its trials, with a 95% bootstrap interval.
+A score of 1.0 is perfect - the model navigated to the solution in a minimum number of steps. A score of 0.1 means that the model explored ten times as many nodes as necessary. The score of a domain is the geometric mean over its trials, with a 95% bootstrap interval.
 
 The table shows three other columns on the same trials:
 
@@ -198,7 +198,8 @@ Hosted models can change over time. Each record holds the model name that the AP
 | `regret` | `chosen_distance` minus `best_distance`. 0 means that the model chose a best state. |
 | `best_rank` | the place of the best state in the model's order of probability. 0 is first. |
 | `top` | the 5 states with the highest probability, each with its probability and its distance |
-| `requests`, `input_tokens`, `latencies_ms`, `refusals` | the cost of the step |
+| `requests`, `input_tokens`, `latencies_ms` | the cost of the step |
+| `refusals`, `invalid_answers`, `retries` | the intermittent errors of the step |
 
 A trial that ran before the trace files existed has no trace. To make the traces, run the trials again:
 
@@ -208,21 +209,31 @@ uv run python -m beelinebench run --chooser <name> --retrace
 
 This command runs each trial that has a result and no trace again. The new result replaces the old result, so that the result and the trace come from the same run. The command spends money.
 
+### Clean trials
+
+A trial is clean if it has no refusals, no invalid answers, and no retries. Each record and each trace step gives these counts. To run the trials that are not clean again, use this command:
+
+```bash
+uv run python -m beelinebench run --chooser <name> --rerun-unclean
+```
+
+The new run replaces the old run only if the new run has fewer refusals, invalid answers, and retries. The score of the new run has no effect on this decision. Thus, the command cannot select good scores.
+
 ## Price estimates
 
 A full run of benchmark 1.0.0 has 100 trials for each of its 6 domains. The table gives the estimated price of one full run for each hosted model.
 
 | model | price for a million tokens | input tokens of a full run | estimated price of a full run | basis |
 |---|---|---|---|---|
-| Jev 1.13 | $0.042 input, output free | 203 million | $8.51 | measured on 500 trials; token counts of GPT-6 Luna (Decisions) |
-| GPT-6 Luna (Decisions) | $0.10 input, output free | 209 million | $20.93 | measured on 501 trials |
-| pplx-decider 1.1 | $0.02 input, output free | 186 million | $3.73 | measured on 350 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13 |
-| pplx-decider 1.0 | $0.02 input, output free | 193 million | $3.86 | measured on 35 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
-| Liquid d1 | $0.04 input, output free | 315 million | $12.62 | measured on 13 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
-| Kev 4B | $0.042 input, output free | 663 million | $27.83 | measured on 1 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
-| Mercury Decide | $0.02 input, output free | 165 million | $3.30 | measured on 35 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
-| Clef | $0.24 input, output free | 195 million | $46.92 | token counts of GPT-6 Luna (Decisions), Jev 1.13, pplx-decider 1.1 |
-| Clef-flash | $0.09 input, output free | 1,085 million | $97.63 | measured on 25 trials; token counts of GPT-6 Luna (Decisions) |
+| Jev 1.13 | $0.042 input, output free | 527 million | $22.12 | measured on 580 trials |
+| GPT-6 Luna (Decisions) | $0.10 input, output free | 293 million | $29.33 | measured on 527 trials |
+| pplx-decider 1.1 | $0.02 input, output free | 343 million | $6.85 | measured on 527 trials |
+| pplx-decider 1.0 | $0.02 input, output free | 665 million | $13.31 | measured on 30 trials |
+| Liquid d1 | $0.04 input, output free | 609 million | $24.35 | measured on 136 trials; token counts of Jev 1.13, pplx-decider 1.1 |
+| Kev 4B | $0.042 input, output free | 841 million | $35.33 | measured on 8 trials; token counts of Jev 1.13, pplx-decider 1.1 |
+| Mercury Decide | $0.02 input, output free | 465 million | $9.31 | measured on 392 trials; token counts of Jev 1.13, pplx-decider 1.1 |
+| Clef | $0.24 input, output free | 1,343 million | $322.40 | measured on 30 trials |
+| Clef-flash | $0.09 input, output free | 1,969 million | $177.25 | measured on 30 trials |
 
 The estimate uses the mean input tokens and output tokens of a trial in `results/`. If a model has no results for a domain, the estimate uses the token counts of a different model. The basis column gives the source of the token counts.
 
@@ -310,9 +321,9 @@ When the API refuses a question, the chooser asks once more, with the options in
 
 ### Cloudflare rejects an option that contains a slash
 
-Cloudflare's API for Clef returns the status 400 if an option name contains the character `/`. The error message says that `model`, `state`, and `questions` are missing, but the request contains them. The 8-puzzle uses `/` to divide the rows of a board. Thus, each 8-puzzle question fails.
+Cloudflare's API for Clef returns the status 400 if an option name contains the character `/`. The error message says that `model`, `state`, and `questions` are missing, but the request contains them. An earlier version of the 8-puzzle used `/` to divide the rows of a board, and each of its questions failed.
 
-The `clef` and `clef-flash` choosers send `|` in place of `/`. Only the option names must not contain `/`. The replacement also applies to the goal and the context, so the model sees one notation. The `replace` setting in `beelinebench.toml` controls it. The other choosers send `/`.
+Thus, the 8-puzzle and Rush Hour divide the rows of a board with `|`, for each model. No option name contains `/`. The `replace` setting of a chooser in `beelinebench.toml` can change other text, if a different API needs it.
 
 ### OpenRouter answers with a dated model name
 
@@ -330,7 +341,15 @@ These decision models do not accept the question that BeelineBench sends:
 
 ### Errors from the APIs
 
-If an API returns the status 429, 500, 502, 503, 504, or 529, the client sends the request again. It sends the request a maximum of five times. If the account has no credits, OpenAI also returns the status 429. Cloudflare returns 429 when the account uses all of its free allocation for the day. For these two errors, the client does not send the request again, and the run stops. BeelineBench does not record the trial that was in progress.
+Some errors are intermittent: a timeout, a dropped connection, the status 408 or 429, or a status from 500 to 599. For these errors, the client sends the request again, a maximum of 8 times. The wait between two tries increases to one minute. If the API gives a `Retry-After` time, the client waits for that time.
+
+Some errors are not intermittent, and the run stops at once:
+
+- OpenAI returns the status 429 when the account has no credits.
+- Cloudflare returns the status 429 when the account uses all of its free allocation for the day.
+- The answer comes from a model that is different from the requested model.
+
+BeelineBench does not record the trial that was in progress when the run stopped.
 
 ### The Claude reference
 

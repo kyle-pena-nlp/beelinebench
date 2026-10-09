@@ -45,7 +45,7 @@ TICKS = (0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0)
 
 #: The look of the figures. A change of the look changes this number, so that
 #: ``readme`` draws the figures again.
-STYLE = 21
+STYLE = 25
 
 #: The PNG text key that holds the fingerprint of the rows.
 FINGERPRINT_KEY = "beelinebench-rows"
@@ -264,7 +264,9 @@ def frontier(points: list[Row]) -> list[Row]:
 
 #: The mark of each model in the frontier plot, in a fixed order. A model keeps its
 #: mark in each panel.
-MODEL_MARKS = ("D", "o", "s", "^", "v", "P", "X", "h", "<", ">", "*", "p")
+#: Only shapes that look different at a small size: no hexagon or pentagon, which look
+#: like a circle.
+MODEL_MARKS = ("o", "s", "D", "^", "v", "P", "X", "*", "<", ">")
 
 
 def convex_frontier(points: list[Row]) -> list[Row]:
@@ -297,8 +299,7 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
 
     A step is one request: the model chooses one state of the frontier. The cost is
     the mean tokens of a request at the model's list price. A low cost and a high
-    score are better. The score axis is reversed, so the best models are at the bottom
-    left, and the frontier falls from the top left to the bottom right.
+    score are better. The cost axis is reversed, so the best models are at the top right.
     """
     import matplotlib
 
@@ -340,12 +341,14 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
                       + [edge[-1].cost_per_step * 1000])
         ax.plot(frontier_x, frontier_y, color=MARK, linewidth=1.4, zorder=2)
         for r in sorted(models, key=lambda r: r.score, reverse=True):
+            # A star draws smaller than the other shapes at one size, so it is larger.
+            size = 10 if marks[r.label] == "*" else 7
             ax.plot(r.score, r.cost_per_step * 1000, linestyle="none", marker=marks[r.label],
-                    markersize=7, zorder=3, color=MARK,
+                    markersize=size, zorder=3, color=MARK,
                     markeredgecolor=SURFACE, markeredgewidth=1.0,
                     label=f"{r.label}{r.marks}")
         # Each panel has its own legend, of the models in that panel.
-        ax.legend(loc="lower left", ncol=2, fontsize=7, columnspacing=1.0, frameon=True, framealpha=0.92, facecolor=SURFACE,
+        ax.legend(loc="upper right", ncol=2, fontsize=7, columnspacing=1.0, frameon=True, framealpha=0.92, facecolor=SURFACE,
                   edgecolor=GRID, handletextpad=0.4, borderpad=0.5, labelcolor=TEXT)
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
@@ -355,15 +358,15 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
     for ax in cells[len(groups):]:
         ax.axis("off")
     first = cells[0]
-    # The score axis runs from 1.0 down, so the frontier falls from the accurate and
-    # expensive models at the top left to the cheap ones at the bottom right.
-    first.set_xlim(1.0, lowest / 1.3)
-    # Nothing is cheaper than the cheapest model, so the band below it is empty in each
+    # The score grows to the right, and the cost axis is reversed: cheaper is higher. So the
+    # best models are at the top right.
+    first.set_xlim(lowest / 1.3, 1.0)
+    # Nothing is cheaper than the cheapest model, so the band above it is empty in each
     # panel. Make the band tall enough for the legend, which goes there.
     rows_most = math.ceil(max(len(models) for _, models in groups) / 2)  # two columns
     band = min(0.45, 0.07 * rows_most + 0.06)  # the part of the panel's height for the legend
     span = math.log10(max(costs) * 1.6) - math.log10(min(costs))
-    first.set_ylim(min(costs) / 10 ** (span * band / (1 - band)), max(costs) * 1.6)
+    first.set_ylim(max(costs) * 1.6, min(costs) / 10 ** (span * band / (1 - band)))
     first.xaxis.set_major_locator(FixedLocator([t for t in TICKS if t >= lowest / 1.3]))
     # Minor gridlines at 2, 3, ... 9 times each power of ten, on both axes.
     first.xaxis.set_minor_locator(LogLocator(subs=range(2, 10)))
@@ -374,8 +377,8 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
     first.yaxis.set_major_formatter(lambda value, _: f"${value:g}")
     # The panels share their limits and scales, and each panel shows its own axes.
     for ax in cells[:len(groups)]:
-        ax.set_ylabel("US dollars for 1,000 steps (log scale)", color=MUTED)
-        ax.set_xlabel("score (log scale, reversed)", color=MUTED)
+        ax.set_ylabel("US dollars for 1,000 steps (log scale, reversed)", color=MUTED)
+        ax.set_xlabel("score (log scale)", color=MUTED)
         ax.tick_params(labelbottom=True, labelleft=True)
 
     notes = ("A mark is a model: its score, the geometric mean over its trials, and the cost of "

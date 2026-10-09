@@ -26,7 +26,7 @@ NAMES = "ABCDEFGHIJKLMNOPQRSTUVW"
 
 CONTEXT = (
     "A state is a 6 by 6 board, written row by row from the top, with the rows "
-    "separated by /. A dot is an empty cell. Each letter is a vehicle: two cells for a "
+    "separated by |. A dot is an empty cell. Each letter is a vehicle: two cells for a "
     "car, three for a truck. A vehicle moves only along its own direction: a "
     "horizontal vehicle moves left or right, and a vertical vehicle moves up or down. "
     "A move slides one vehicle any number of empty cells. X is the red car, on the "
@@ -93,12 +93,16 @@ def blocking_cars(vehicles: tuple[Vehicle, ...], state: State) -> int:
 
 
 def board(vehicles: tuple[Vehicle, ...], state: State) -> str:
-    """The board on one line, for example ``..AA.. / ..B... / XXB... / ...``."""
+    """The board on one line, for example ``..AA.. | ..B... | XXB... | ...``.
+
+    The rows are separated by ``|``, not ``/``: Cloudflare's API rejects an option name
+    that holds ``/``.
+    """
     grid = [["."] * SIZE for _ in range(SIZE)]
     for v, at in zip(vehicles, state):
         for row, column in cells(v, at):
             grid[row][column] = v.name
-    return " / ".join("".join(row) for row in grid)
+    return " | ".join("".join(row) for row in grid)
 
 
 def random_board(rng: Draws, count: int) -> tuple[tuple[Vehicle, ...], State]:
