@@ -116,3 +116,21 @@ def test_the_frontier_never_holds_more_than_the_cap():
                          max_expansions=20, max_frontier=255, evict=Draws("test"),
                          observe=lambda expansions, frontier: sizes.append(frontier))
     assert not outcome.solved and max(sizes) <= 255
+
+
+def test_a_wallet_stops_the_run_at_its_limit_and_keeps_its_total(tmp_path):
+    import pytest
+
+    from beelinebench.search import BudgetExhausted, Wallet, check
+
+    path = tmp_path / "m.json"
+    # $2 a million: 1,000,000 tokens are $2.00
+    wallet = Wallet.open(path, price_input=2.0, price_output=0.0, max_cost=3.0,
+                         start=(1_000_000, 0, 10))
+    spend = Spend(max_requests=100, max_input_tokens=10**9, wallet=wallet)
+    check(spend)
+    spend.add(input_tokens=500_000, output_tokens=0, seconds=0.1, served="m")
+    with pytest.raises(BudgetExhausted, match=r"\$3.00 spent"):
+        check(spend)
+    again = Wallet.open(path, price_input=2.0, price_output=0.0, max_cost=3.0, start=(0, 0, 0))
+    assert (again.input_tokens, again.requests, again.cost) == (1_500_000, 11, 3.0)

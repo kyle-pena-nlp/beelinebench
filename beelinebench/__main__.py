@@ -5,6 +5,7 @@
     python -m beelinebench baseline               # the classic arm alone. Sends nothing.
     python -m beelinebench benchmarks             # the official benchmarks, and those of beelinebench.toml
     python -m beelinebench choosers
+    python -m beelinebench probe --chooser luna   # one question of 255 options. Spends a little.
     python -m beelinebench report
     python -m beelinebench plot                   # docs/benchmarks/<version>.png, the scores as a figure
     python -m beelinebench download
@@ -43,10 +44,12 @@ from .domains import blocksworld, countdown, tiles, wikispeedia, word_ladder
 from .rng import Draws
 from .run import (Record, append, baseline, best, geometric_mean, measure, read, results_file,
                   shortest, summarise)
-from .search import BudgetExhausted, ChooserError, Problem, Spend, efficiency
+from .search import BudgetExhausted, ChooserError, Problem, Spend, Wallet, efficiency
 
 PROJECT = Path(__file__).resolve().parent.parent
 RESULTS = PROJECT / "results"
+#: The total cost of each model over all runs: .spend/<chooser>.json.
+SPEND = PROJECT / ".spend"
 OFFICIAL = PROJECT / "benchmarks.toml"
 DOCS = PROJECT / "docs" / "benchmarks"
 
@@ -151,16 +154,25 @@ def run(args: argparse.Namespace) -> None:
         trials = args.trials or chooser.trials or cfg.run.trials or chosen.trials
         finished = run_chooser(chooser, chosen, label, domains, trials,
                                max_requests=args.max_requests or chooser.max_requests,
-                               max_input_tokens=args.max_input_tokens or chooser.max_input_tokens)
+                               max_input_tokens=args.max_input_tokens or chooser.max_input_tokens,
+                               max_cost=chooser.max_cost or cfg.run.max_cost)
         show_match(chooser.name, chosen, label, domains, officials, finished)
 
 
 def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
                 domains: list[str], trials: int, *, max_requests: int,
-                max_input_tokens: int) -> bool:
-    """Run one chooser over ``domains``. False when it stopped at a limit."""
+                max_input_tokens: int, max_cost: float | None = None) -> bool:
+    """Run one chooser over ``domains``. False when it stopped at a limit.
+
+    With ``max_cost`` and a price, the run stops before the request that would start
+    when the model's cost over all runs is ``max_cost`` or more.
+    """
     make_chooser = config.factory(chooser, PROJECT / ".env")
-    spend = Spend(max_requests=max_requests, max_input_tokens=max_input_tokens)
+    spend = Spend(max_requests=max_requests, max_input_tokens=max_input_tokens,
+                  wallet=wallet_of(chooser, max_cost))
+    if spend.wallet is not None:
+        console.print(f"{chooser.name} has cost ${spend.wallet.cost:.2f} in all. "
+                      f"The limit is ${spend.wallet.max_cost:.2f}.")
     with progress() as bars:
         for domain in domains:
             make = maker(domain, chosen.domains[domain])
@@ -196,6 +208,20 @@ def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
     console.print(f"{chooser.name} spent {spend.requests:,} requests, "
                   f"{spend.input_tokens:,} input tokens, {spend.output_tokens:,} output tokens")
     return True
+
+
+def wallet_of(chooser: config.ChooserConfig, max_cost: float | None) -> Wallet | None:
+    """The cost of ``chooser`` over all runs, with its limit. ``None`` without a price or limit.
+
+    A model without a file in .spend/ starts at the tokens of its recorded trials.
+    """
+    if max_cost is None or chooser.price_input is None:
+        return None
+    records = [r for path in RESULTS.glob(f"*/{chooser.name}/*.jsonl") for r in read(path)]
+    start = (sum(r.input_tokens for r in records), sum(r.output_tokens for r in records),
+             sum(r.requests for r in records))
+    return Wallet.open(SPEND / f"{chooser.name}.json", price_input=chooser.price_input,
+                       price_output=chooser.price_output or 0.0, max_cost=max_cost, start=start)
 
 
 def show_match(chooser: str, chosen: Benchmark, label: str, domains: list[str],
@@ -244,6 +270,33 @@ def show_benchmarks(args: argparse.Namespace) -> None:
                                 str(b.max_frontier)) if n == 0 else ("",) * 5,
                               domain, ", ".join(f"{k}={v}" for k, v in settings.items()))
     console.print(table)
+
+
+def probe(args: argparse.Namespace) -> None:
+    """Send one question with the most options to a chooser, and show the answer."""
+    from types import SimpleNamespace
+
+    from .jev import MAX_OPTIONS
+
+    officials = benchmark.load(OFFICIAL)
+    cfg = config.load(args.config, officials)
+    if args.chooser not in cfg.choosers:
+        raise SystemExit(f"no chooser {args.chooser!r} in {args.config}. "
+                         f"It has: {', '.join(cfg.choosers)}")
+    chooser = cfg.choosers[args.chooser]
+    problem = SimpleNamespace(objective="reach the state with the highest number",
+                              context="Each state is a number.", render=lambda n: f"state {n}")
+    spend = Spend(max_requests=2, max_input_tokens=10**7,
+                  wallet=wallet_of(chooser, chooser.max_cost or cfg.run.max_cost))
+    choose = config.factory(chooser, PROJECT / ".env")(problem, spend, Draws("probe"))
+    try:
+        pick = choose(list(range(1, MAX_OPTIONS + 1)))
+    except ChooserError as error:
+        raise SystemExit(f"{chooser.name}: {error}")
+    console.print(f"{chooser.name}: the API accepted {MAX_OPTIONS} options. "
+                  f"Model {', '.join(spend.served)} chose state {pick + 1}. "
+                  f"{spend.input_tokens:,} input tokens, {spend.latencies_ms[-1]:,} ms, "
+                  f"{spend.refusals} refusals.")
 
 
 def choosers(args: argparse.Namespace) -> None:
@@ -427,6 +480,10 @@ def main() -> None:
                         ).set_defaults(handler=show_benchmarks)
     commands.add_parser("choosers", help="the choosers of the config"
                         ).set_defaults(handler=choosers)
+    command = commands.add_parser("probe", help="send one question with 255 options to a "
+                                  "chooser. Spends one or two requests.")
+    command.set_defaults(handler=probe)
+    command.add_argument("--chooser", required=True)
     commands.add_parser("report", help="the score of each result file"
                         ).set_defaults(handler=report)
     command = commands.add_parser("plot", help="the scores of an official benchmark as a "

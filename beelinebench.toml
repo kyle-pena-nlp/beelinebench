@@ -6,6 +6,9 @@ benchmark = "1.0.0"                 # a benchmark of benchmarks.toml, or of this
 choosers = ["jev-1.13", "luna", "pplx-decider", "clef", "clef-flash"]   # one after the other
 # domains = ["tiles", "countdown"]     # leave out for every domain of the benchmark
 # trials = 5                        # leave out for the trials of the benchmark
+max_cost = 25.0                     # US dollars: the most one model may cost in all runs.
+                                    # .spend/<chooser>.json holds each total. A chooser can
+                                    # set its own max_cost.
 
 # A chooser:
 #

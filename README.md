@@ -4,17 +4,13 @@
 
 **How efficiently do decision models navigate multi-step problems?**
 
-BeelineBench measures how well a choice model guides a best-first search against a state-space representing a classic problem solving domain.  In multi-step problems (like blockworld or sliding tile puzzles), a model that navigates more directly to a solution "plans ahead" better.  This benchmark measures how efficiently Jev and other choice models navigate to a solution, compared to a perfect search along the shortest path.
+BeelineBench measures how well a decision model "plans ahead" when solving a multi-step problem.  A model that navigates more directly ("beelines") to a solution "plans ahead" spends less time exploring dead ends.  This benchmark measures how efficiently Jev and other choice models navigate to a solution, compared to a perfect search along the shortest path.
 
 ## Benchmark (Higher is Better)
 
 Scores for benchmark 1.0.0, from the files in `results/1.0.0/`:
 
 ![The scores of each model and heuristic in benchmark 1.0.0, by domain, with 95% intervals](docs/benchmarks/1.0.0.png)
-
-For the numbers, run `uv run python -m beelinebench report`.
-
-[`docs/benchmarks/README.md`](docs/benchmarks/README.md) is the index of benchmark versions. Each version has a page with its settings, its changes, and its results.
 
 ## Introduction
 
@@ -106,6 +102,7 @@ Other commands:
 |---|---|
 | `benchmarks` | Lists the official benchmark versions. |
 | `choosers` | Lists the choosers in `beelinebench.toml`. |
+| `probe` | Sends one question with 255 options to a chooser, and shows the answer. Spends one or two requests. |
 | `report` | Prints the scores, the share of solved trials, the served model, and the request times. |
 | `plot` | Draws the scores of a benchmark to `docs/benchmarks/<version>.png`, one row for each model in each domain, with the 95% interval. Needs `uv sync --extra plot`. |
 
@@ -185,11 +182,11 @@ A full run of benchmark 1.0.0 has 100 trials for each of its 5 domains. The tabl
 
 | model | price for a million tokens | input tokens of a full run | estimated price of a full run | basis |
 |---|---|---|---|---|
-| Jev 1.13 | $0.042 input, output free | 119 million | $4.99 | measured on 100 trials |
-| GPT-6 Luna (Decisions) | $0.10 input, output free | 111 million | $11.08 | measured on 349 trials; token counts of Jev 1.13 |
-| pplx-decider 1.1 | $0.02 input, output free | 158 million | $3.16 | measured on 18 trials; token counts of GPT-6 Luna (Decisions), Jev 1.13 |
-| Clef | $0.24 input, output free | 111 million | $26.59 | token counts of GPT-6 Luna (Decisions), Jev 1.13 |
-| Clef-flash | $0.09 input, output free | 111 million | $9.97 | token counts of GPT-6 Luna (Decisions), Jev 1.13 |
+| Jev 1.13 | $0.042 input, output free | 95 million | $3.98 | measured on 124 trials |
+| GPT-6 Luna (Decisions) | $0.10 input, output free | 113 million | $11.33 | measured on 452 trials |
+| pplx-decider 1.1 | $0.02 input, output free | 134 million | $2.68 | measured on 64 trials; token counts of GPT-6 Luna (Decisions) |
+| Clef | $0.24 input, output free | 113 million | $27.20 | token counts of GPT-6 Luna (Decisions) |
+| Clef-flash | $0.09 input, output free | 1,372 million | $123.51 | measured on 1 trials; token counts of GPT-6 Luna (Decisions) |
 
 The estimate uses the mean input tokens and output tokens of a trial in `results/`. If a model has no results for a domain, the estimate uses the token counts of a different model. The basis column gives the source of the token counts.
 
@@ -197,11 +194,23 @@ A borrowed estimate is approximate. A model that explores more states sends more
 
 The prices come from `price_input` and `price_output` in `beelinebench.toml`. They are list prices in US dollars from October 2026, and the providers can change them. Workers AI gives each account 10,000 Neurons free each day, so a small run of Clef can cost less.
 
+A run stops before a request if the total cost of the model is at its limit. `max_cost` in `beelinebench.toml` sets the limit, and the default is $25 for each model. The file `.spend/<chooser>.json` keeps the total cost of each model over all runs. The total includes trials that stopped before they were complete.
+
 The table does not include local models. A local model has no price for each token, but it needs a GPU. [Run Clef on your own GPU](#run-clef-on-your-own-gpu) gives the details.
 
 ## Benchmarks
 
 Benchmark 1.0.0 has 5 domains. Each domain has one heuristic and 100 trials.
+
+### The problems
+
+- **8-puzzle** ([Wikipedia](https://en.wikipedia.org/wiki/15_puzzle)): the player slides eight numbered tiles on a 3 × 3 board, through one gap, until the tiles are in order.
+- **Blocksworld** ([Wikipedia](https://en.wikipedia.org/wiki/Blocks_world)): a robot hand moves blocks, one at a time, until the blocks make the goal towers.
+- **Countdown** ([Wikipedia](https://en.wikipedia.org/wiki/Countdown_(game_show))): the player combines four numbers with addition, subtraction, multiplication, and division to make a target number.
+- **Word ladder** ([Wikipedia](https://en.wikipedia.org/wiki/Word_ladder)): the player changes one letter at a time to get from a start word to a target word, and each step must be a word.
+- **Wikispeedia** ([SNAP](https://snap.stanford.edu/data/wikispeedia.html)): the player clicks links from one Wikipedia article to the next, until the player gets to the target article.
+
+### Settings
 
 | domain | heuristic | state | trial |
 |---|---|---|---|
@@ -267,6 +276,109 @@ The `haiku` chooser uses the default temperature of the Anthropic API, and that 
 
 ## How to contribute
 
+You can contribute a new model, a new problem (domain), or a new benchmark version. Open a pull request with the code, the results, and the README.
+
+### What makes a good problem
+
+The best new problem shows a difference between models that the other problems do not show. Before you write the code, compare your idea with this list.
+
+- **It has a clear goal and a clear move.** A model must understand the goal and each state from one line of text. Two states must not have the same text.
+- **Its shortest path is known.** The breadth-first search visits each state that the start can reach. Thus, the state space must fit in the memory of one machine. The 8-puzzle has 181,440 states.
+- **It has space above and below the heuristic.** A good heuristic score is between 0.1 and 0.8. If the heuristic is near 1.0, models cannot do better. If the heuristic often stops at the limit, the trials are too slow.
+- **It is different from the problems that exist.** The problems now test spatial moves, symbolic planning, arithmetic, word changes, and knowledge of Wikipedia. A new kind of planning adds the most.
+- **It tests planning, not memory.** A model can know a famous puzzle from its training data. A problem that a computer generates, with names that have no meaning, gives a better test.
+- **It is the same on each machine.** Each trial must come from seeded draws. [Add a problem](#add-a-problem) gives the rules.
+- **It is cheap to run.** The model gets each frontier state as one option, in each request. Thus, a long state text makes each request expensive.
+
+To examine an idea, write the module. Then add an experiment benchmark with your domain to `beelinebench.toml`:
+
+```toml
+[benchmark.my-problem]
+trials = 20
+max_expansions = 2500
+max_frontier = 255
+
+[benchmark.my-problem.domains.<name>]
+heuristic = "<heuristic>"
+```
+
+Run the heuristic and the oracle alone. This command sends no requests:
+
+```bash
+uv run python -m beelinebench baseline --benchmark my-problem
+```
+
+Look at the heuristic score, the oracle score, and the time. If the heuristic score is between 0.1 and 0.8 and the oracle score is near 1.0, the problem is a good candidate.
+
+### What makes a good model to add
+
+- **It is a decision model.** It answers a choice question with a probability for each option. A general language model can be a reference, but the README does not show it. [The Claude reference](#the-claude-reference) gives the reason.
+- **It accepts 255 options in one question.** If it accepts fewer options, the frontier limit changes for that model, and its scores are not comparable.
+- **It names a fixed version.** Each response must give the name of the model that answered. An alias that changes to a new model makes old results wrong.
+- **Other people can use it.** It is a public API or a model with open weights. A private model makes results that nobody can repeat.
+
+### Add a model
+
+A model can use the Jev protocol, OpenAI's Decisions API, or the Anthropic API. If it uses a different API, first do the steps in [Add a protocol](#add-a-protocol).
+
+1. Add a `[chooser.<name>]` table to `beelinebench.toml`. The comments at the top of the file describe each setting.
+2. If the API has model versions, set `model` to one version, for example `jev-1.13.0`. Each response must give that name.
+3. Set `price_input` and `price_output` to the list prices of the provider, in US dollars for a million tokens.
+4. Put the key in `.env`, with the name that `api_key_env` gives.
+5. Send one question with 255 options to the model:
+
+   ```bash
+   uv run python -m beelinebench probe --chooser <name>
+   ```
+
+   If the command fails, read the error. [Model quirks and limits](#model-quirks-and-limits) gives the known errors.
+6. Run 5 trials of each domain:
+
+   ```bash
+   uv run python -m beelinebench run --chooser <name> --trials 5
+   uv run python -m beelinebench report
+   ```
+
+7. Look at the input tokens in the report, and calculate the price of a full run. If the price is too high, stop here.
+8. Run the full benchmark. The run starts after the trials that are in `results/` already.
+
+   ```bash
+   uv run python -m beelinebench run --chooser <name>
+   ```
+
+9. Run `uv run python -m beelinebench readme`. Then commit the results, `README.md`, and the figure.
+
+If the total cost of the model gets to $25, the `max_cost` limit stops the run. To change the limit for one model, set `max_cost` in its table. If the model has a behavior that changes its score, add it to [Model quirks and limits](#model-quirks-and-limits).
+
+### Add a protocol
+
+A chooser is a function that gets the frontier and returns the index of the state to explore:
+
+```python
+def choose(states: Sequence[State]) -> int: ...
+```
+
+`beelinebench/jev.py`, `beelinebench/decisions.py`, and `beelinebench/llm.py` are examples. `beelinebench/config.py` selects the chooser from the configuration file. A new chooser must obey these rules:
+
+- Send the full frontier in one request, in the order that the `order` draws give.
+- Count each request in the `Spend` object, so that the cost limit and the report are correct.
+- Make sure that each response gives the name of the requested model.
+- If the model gives no valid answer, count an invalid answer, and take the first state of the shuffled list.
+
+### Add a problem
+
+Before you start, read [What makes a good problem](#what-makes-a-good-problem).
+
+1. Add a module to `beelinebench/domains/`. Give it a function `problem(trial, *, heuristic, ...)` that returns a `Problem`.
+2. Make each trial from `Draws("<domain>", trial)` only. Do not use the `random` module, `hash()`, or the order of a set. Then each trial is the same on each machine.
+3. Write each state on one line with `render`. Two states must not have the same text.
+4. Add the domain to `maker` in `beelinebench/__main__.py`.
+5. Add its name and the name of its heuristic to `TITLES` and `HEURISTIC_TITLES` in `beelinebench/domains/__init__.py`.
+6. If the domain needs no downloaded data, add it to `tests/test_portable.py`.
+7. Add the domain to a new benchmark version. [Add a benchmark version](#add-a-benchmark-version) gives the steps.
+
+The breadth-first search visits each state that the start can reach, to find the shortest path. Thus, the state space must be small enough for the memory of one machine. The 8-puzzle, with 181,440 states, is the largest domain now.
+
 ### Add a benchmark version
 
 A new version adds a table to `benchmarks.toml`. Do not change or remove an existing table. Old versions must stay runnable.
@@ -285,20 +397,6 @@ Use the version number for the type of change:
 | PATCH | a fix that changes no score |
 
 If you change the text that the model sees, include the scores from the old version and the new version.
-
-### Add a domain
-
-A good domain has a reasonable heuristic that is not near perfect. Its frontier must fit in one request (255 states). Its trials must finish in a reasonable time. Put new domains in `beelinebench/domains/`.
-
-### Add a protocol
-
-A chooser is a function that gets the frontier and returns the index of the state to explore:
-
-```python
-def choose(states: Sequence[State]) -> int: ...
-```
-
-`beelinebench/jev.py` and `beelinebench/llm.py` are examples. `beelinebench/config.py` selects the chooser from the configuration file.
 
 ### Edit this README
 

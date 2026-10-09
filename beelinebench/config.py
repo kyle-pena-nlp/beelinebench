@@ -39,6 +39,8 @@ class ChooserConfig:
     endpoint: str = "systemone"
     #: jev only: text in the options and the framing, and the text that the API gets in its place.
     replace: dict[str, str] = field(default_factory=dict)
+    #: The most that this model may cost in all runs. ``None`` takes ``[run] max_cost``.
+    max_cost: float | None = None
     #: False leaves the chooser out of the README: its figure, results table and prices.
     publish: bool = True
     #: US dollars for a million input and output tokens. ``None`` for a local model.
@@ -58,6 +60,8 @@ class RunConfig:
     domains: tuple[str, ...] | None
     #: ``None`` takes the trials of the benchmark.
     trials: int | None
+    #: The most that one model may cost in all runs, in US dollars. ``None`` for no limit.
+    max_cost: float | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +89,7 @@ def load(path: Path, officials: dict[str, Benchmark]) -> Config:
             max_requests=table["max_requests"], max_input_tokens=table["max_input_tokens"],
             label=table.get("label"), endpoint=table.get("endpoint", "systemone"),
             replace=dict(table.get("replace", {})), publish=table.get("publish", True),
+            max_cost=table.get("max_cost"),
             price_input=table.get("price_input"), price_output=table.get("price_output"))
     customs = benchmark.parse(data.get("benchmark", {}))
     for name in customs:
@@ -94,7 +99,7 @@ def load(path: Path, officials: dict[str, Benchmark]) -> Config:
     return Config(
         run=RunConfig(benchmark=run["benchmark"], choosers=tuple(run.get("choosers", ())),
                       domains=tuple(run["domains"]) if "domains" in run else None,
-                      trials=run.get("trials")),
+                      trials=run.get("trials"), max_cost=run.get("max_cost")),
         choosers=choosers, benchmarks=customs)
 
 

@@ -6,10 +6,12 @@ Both arms of the benchmark run :func:`best_first`. The one part that changes is
 
 from __future__ import annotations
 
+import json
 import math
 from collections import deque
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .rng import Draws
@@ -58,6 +60,57 @@ class BudgetExhausted(Exception):
 def check(spend: "Spend") -> None:
     if spend.requests >= spend.max_requests or spend.input_tokens >= spend.max_input_tokens:
         raise BudgetExhausted(f"{spend.requests} requests, {spend.input_tokens} input tokens")
+    wallet = spend.wallet
+    if wallet is not None and wallet.cost >= wallet.max_cost:
+        raise BudgetExhausted(f"${wallet.cost:.2f} spent on this model in all, and the limit is "
+                              f"${wallet.max_cost:.2f}")
+
+
+@dataclass
+class Wallet:
+    """What one model has cost in all runs, and the most it may cost.
+
+    The total is in the file ``path``, and :meth:`add` writes it after each request,
+    so a run that stops in a trial still counts that trial's requests. The prices are
+    US dollars for a million tokens.
+    """
+
+    path: Path
+    price_input: float
+    price_output: float
+    max_cost: float
+    input_tokens: int = 0
+    output_tokens: int = 0
+    requests: int = 0
+
+    @property
+    def cost(self) -> float:
+        return (self.input_tokens * self.price_input
+                + self.output_tokens * self.price_output) / 1e6
+
+    @classmethod
+    def open(cls, path: Path, *, price_input: float, price_output: float, max_cost: float,
+             start: tuple[int, int, int]) -> "Wallet":
+        """The wallet in ``path``. A new one starts at ``start``: input tokens, output tokens, requests."""
+        if path.exists():
+            saved = json.loads(path.read_text())
+            start = (saved["input_tokens"], saved["output_tokens"], saved["requests"])
+        wallet = cls(path, price_input, price_output, max_cost, *start)
+        wallet.save()
+        return wallet
+
+    def add(self, input_tokens: int, output_tokens: int) -> None:
+        self.input_tokens += input_tokens
+        self.output_tokens += output_tokens
+        self.requests += 1
+        self.save()
+
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps({"input_tokens": self.input_tokens,
+                                         "output_tokens": self.output_tokens,
+                                         "requests": self.requests,
+                                         "cost_usd": round(self.cost, 4)}) + "\n")
 
 
 @dataclass
@@ -65,7 +118,8 @@ class Spend:
     """What a run may send to a model, and what it sent.
 
     A run stops before a request when it has sent ``max_requests`` requests or
-    ``max_input_tokens`` input tokens.
+    ``max_input_tokens`` input tokens, or when the ``wallet`` of the model is at its
+    limit.
 
     ``invalid_answers`` counts answers that named no state. The chooser then takes
     the first state of its shuffled list.
@@ -84,10 +138,14 @@ class Spend:
     refusals: int = 0
     latencies_ms: list[int] = field(default_factory=list)
     served: list[str] = field(default_factory=list)
+    #: The total cost of the model over all runs, and its limit. ``None`` for no limit.
+    wallet: Wallet | None = None
 
     def add(self, *, input_tokens: int, output_tokens: int, seconds: float,
             served: str) -> None:
         """Count one request."""
+        if self.wallet is not None:
+            self.wallet.add(input_tokens, output_tokens)
         self.requests += 1
         self.input_tokens += input_tokens
         self.output_tokens += output_tokens
