@@ -1,6 +1,6 @@
 [project]
 name = "beelinebench"
-version = "1.0.0"
+version = "1.0.1"
 description = "How efficiently do decision models navigate multi-step problems?"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -73,3 +73,8 @@ replacement = '![\1](https://raw.githubusercontent.com/kyle-pena-nlp/beelinebenc
 [[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
 pattern = '\]\((?!https?://|#|mailto:)([^)]+)\)'
 replacement = '](https://github.com/kyle-pena-nlp/beelinebench/blob/main/\1)'
+
+# The logo in the header of the README is an HTML image.
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = 'src="(?!https?://)([^"]+)"'
+replacement = 'src="https://raw.githubusercontent.com/kyle-pena-nlp/beelinebench/main/\1"'

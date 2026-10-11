@@ -21,6 +21,7 @@ from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import VERSION
 from .benchmark import Benchmark
 from .rng import Draws
 from .case_study import STUDIES
@@ -449,6 +450,7 @@ def placeholders(officials: dict[str, Benchmark], results: Path,
 
     return {
         "latest_benchmark": lambda argument: latest,
+        "code_version": lambda argument: VERSION,
         "latest_benchmark_link": lambda argument: (
             f"[{official(argument).name}]({PAGE.format(official(argument).name)})"),
         "results": lambda argument: results_table(official(argument), results, hidden),

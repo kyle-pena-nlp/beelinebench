@@ -5,8 +5,9 @@ type: software
 authors:
   - family-names: Pena
     given-names: Kyle
-version: 1.0.0
-date-released: 2026-10-10
+    orcid: "https://orcid.org/0009-0005-4428-9429"
+version: 1.0.1
+date-released: 2026-10-11
 license: Apache-2.0
 repository-code: "https://github.com/kyle-pena-nlp/beelinebench"
 url: "https://github.com/kyle-pena-nlp/beelinebench"

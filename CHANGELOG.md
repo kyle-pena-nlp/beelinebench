@@ -4,6 +4,18 @@ The code and the benchmarks have separate versions. The code runs every official
 benchmark of `benchmarks.toml`. A new benchmark version adds a table there, and no
 table is changed.
 
+## Code 1.0.1
+
+* The README opens with a summary table of the newest benchmark: the score of each
+  model on each domain, and the geometric mean over the domains.
+* `docs/usage.md` holds the reference for running BeelineBench, which was in the
+  README.
+* `CITATION.cff` gives the citation, with the author's ORCID.
+* The logo of the README shows on PyPI.
+* The figures are palette PNGs: the same pixels, at about half the size.
+
+The benchmarks do not change.
+
 ## Benchmark 1.0.0
 
 * Greedy best-first search. The model ranks the whole frontier in one question

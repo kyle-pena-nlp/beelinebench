@@ -6,7 +6,7 @@ This page is the reference for running BeelineBench: the steps, the configuratio
 
 ## Run from a clone
 
-These steps run BeelineBench from a clone of the repository. You can also install it as a package, and then run `beelinebench init` in an empty folder. BeelineBench is not on PyPI yet, so install it from GitHub: `pip install "beelinebench[plot] @ git+https://github.com/kyle-pena-nlp/beelinebench"`. [Integrate BeelineBench with your evaluation suite](lab-integration.md) gives the details, and also shows how to run it in a container.
+These steps run BeelineBench from a clone of the repository. You can also install it as a package, and then run `beelinebench init` in an empty folder. To install it from PyPI: `pip install "beelinebench[plot]"`. [Integrate BeelineBench with your evaluation suite](lab-integration.md) gives the details, and also shows how to run it in a container.
 
 > [!CAUTION]
 > `run` sends paid API requests. The model sends one request for each node that it explores.

@@ -120,3 +120,15 @@ def test_the_leaderboard_has_a_row_for_each_model_and_reference(tmp_path):
     assert table.splitlines()[0] == "| model | overall | 8-puzzle | beats the heuristic |"
     assert "| Fake 1 | **0.80** | **0.80** | 1 of 1 |" in table
     assert "| *Heuristic* | *0.50* | *0.50* |  |" in table
+
+
+def test_each_copy_of_the_code_version_is_the_version_of_pyproject():
+    import re
+    import tomllib
+
+    from beelinebench import VERSION
+
+    expected = tomllib.loads((PROJECT / "pyproject.toml").read_text())["project"]["version"]
+    assert VERSION == expected, "run `uv sync`: the installed package is not the current one"
+    cff = re.search(r"^version: (\S+)$", (PROJECT / "CITATION.cff").read_text(), re.M)
+    assert cff and cff.group(1) == expected, "set `version` in CITATION.cff"

@@ -235,6 +235,42 @@ def fingerprint(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
     return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
+def save(fig, out: Path, stamp: str) -> None:
+    """Write ``fig`` to ``out`` as a PNG that holds the fingerprint ``stamp``."""
+    import io
+
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", dpi=200, facecolor=SURFACE)
+    out.write_bytes(compact(buffer.getvalue(), stamp))
+
+
+def compact(png: bytes, stamp: str) -> bytes:
+    """``png`` as small as it can be with the same pixels, and with the fingerprint ``stamp``.
+
+    Matplotlib writes RGBA, but the figures are opaque and use about 200 colors. A PNG
+    with a palette of 256 colors holds them exactly, at about half the size. If a figure
+    has more colors, or any transparency, its pixels stay as they are.
+    """
+    import io
+
+    from PIL import Image, PngImagePlugin
+
+    image = Image.open(io.BytesIO(png))
+    image.load()
+    if image.mode == "RGBA" and image.getchannel("A").getextrema() == (255, 255):
+        image = image.convert("RGB")
+    if image.mode == "RGB" and image.getcolors(256) is not None:
+        indexed = image.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
+        # Only an exact copy replaces the original, so the figure never loses a pixel.
+        if indexed.convert("RGB").tobytes() == image.tobytes():
+            image = indexed
+    info = PngImagePlugin.PngInfo()
+    info.add_text(FINGERPRINT_KEY, stamp)
+    out = io.BytesIO()
+    image.save(out, format="PNG", optimize=True, pnginfo=info, dpi=(200, 200))
+    return out.getvalue()
+
+
 def stored_fingerprint(png: Path) -> str | None:
     """The fingerprint in the text chunks of ``png``, or ``None``."""
     if not png.exists():
@@ -408,7 +444,7 @@ def forest(groups: list[tuple[str, list[Row]]], out: Path, *, title: str, subtit
     fig.tight_layout(rect=(0, 0.02 + 0.016 * (notes.count("\n") + 1), 1, top))
     fig.text(0.01, 0.008, notes, color=MUTED, fontsize=8, va="bottom")
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=200, facecolor=SURFACE, metadata={FINGERPRINT_KEY: stamp})
+    save(fig, out, stamp)
     plt.close(fig)
 
 
@@ -554,9 +590,8 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
     fig.tight_layout(rect=(0, 0.035, 1, top))
     fig.text(0.01, 0.006, notes, color=MUTED, fontsize=8, va="bottom")
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=200, facecolor=SURFACE, metadata={
-        FINGERPRINT_KEY: fingerprint(b, results, labels, hidden, prices, kind="frontier",
-                                     trials=trials, only=only)})
+    save(fig, out, fingerprint(b, results, labels, hidden, prices, kind="frontier",
+                               trials=trials, only=only))
     plt.close(fig)
 
 

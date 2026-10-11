@@ -5,6 +5,8 @@ name: ci
 on:
   push:
   pull_request:
+  # release.yml runs these checks before it publishes.
+  workflow_call:
 
 jobs:
   check:

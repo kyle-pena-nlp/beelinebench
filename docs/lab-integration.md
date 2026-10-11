@@ -173,5 +173,4 @@ The function takes the body of a Jev request, and gives the body of the response
 
 ## Not ready yet
 
-- **The first release on PyPI.** The package is ready, and `.github/workflows/release.yml` publishes a tag such as `v1.0.0`. PyPI must first trust this workflow as a publisher of the project. Until the first release, install from the repository: `pip install "git+https://github.com/kyle-pena-nlp/beelinebench"`.
 - **The Inspect Evals Register.** Since May 2026, [Inspect Evals](https://github.com/UKGovernmentBEIS/inspect_evals) lists new evals that live in their own repositories. An Inspect model generates text, and BeelineBench needs a probability for each option. A listing needs an adapter between the two.

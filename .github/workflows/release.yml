@@ -1,7 +1,8 @@
 # Publishes BeelineBench to PyPI when a tag like v1.0.0 is pushed. It uses PyPI's trusted
 # publishing, so the repository holds no token. Before the first release, add this workflow
 # as a trusted publisher of the project on PyPI: owner kyle-pena-nlp, repository
-# beelinebench, workflow release.yml, environment pypi.
+# beelinebench, workflow release.yml, environment pypi. Nothing is published unless all the
+# checks of ci.yml pass for the tagged commit.
 name: release
 
 on:
@@ -9,7 +10,11 @@ on:
     tags: ["v*"]
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -22,7 +22,7 @@ BeelineBench measures how well a decision model plans ahead when it solves a mul
 - **7 domains**: sliding puzzles, planning, arithmetic, word games, and link navigation on Wikipedia.
 - **Baselines**: the classic heuristic of each domain, random choice, and an oracle that knows the true distance to the goal.
 - **Seeded and portable**: each trial, option order, and dropped state comes from seeded draws, so a trial is the same on each machine.
-- **Intervals on all scores**: each score is a geometric mean over 100 trials, with a 95% bootstrap interval.
+- **95% intervals on all scores**: from a bootstrap over the 100 trials of each domain.
 - **Open harness**: configuration-driven, with a container image. Any model that uses the Jev protocol or OpenAI's Decisions API can run. [Integrate BeelineBench with your evaluation suite](docs/lab-integration.md).
 
 > [!NOTE]
@@ -83,7 +83,7 @@ Three studies measure how much the score of pplx-decider 1.1 changes on one prob
 
 BeelineBench uses the model as the ranker of the frontier in a best-first search. At each step, the search sends all open states to the model in one request. The search stops when it finds the goal.
 
-A beeline score of 1.0 is perfect: the model navigated to the solution in a minimum number of steps. A score of 0.1 means that the model explored ten times as many nodes as necessary. The score of a domain is the geometric mean over its trials, with a 95% interval over 100 random trials from the problem domain.
+A beeline score of 1.0 is perfect: the model navigated to the solution in a minimum number of steps. A score of 0.1 means that the model explored ten times as many nodes as necessary. The score of a domain is the geometric mean over its 100 random trials, with a 95% interval.
 
 The score is the number of nodes in the shortest path to the solution divided by the number of nodes that the model explores:
 
@@ -104,9 +104,7 @@ BeelineBench also gives other measures on the same trials:
 | path score | the shortest path divided by the length of the path that the model found, over the trials that it solved. 1.0 means that the model's path is a shortest path. | `report` |
 | refusals | the share of the model's requests that it refused. Only OpenAI's Decisions API refuses. The chooser then asks once more with the options in a new order. If the API refuses that question too, the chooser takes the first option of the new order. | `report`, and [Model quirks](docs/model-quirks.md) |
 
-All benchmark evaluations are capped at 2,500 explored nodes. Model-based runs that did not find a solution within 2,500 explored nodes are marked with an asterisk (*) on the score. Heuristic-based runs that did not find a solution within 2,500 explored nodes are marked with an obelus (†) on the heuristic score. A capped run counts as 2,500 explored nodes.
-
-Aggregated statistics that contain at least one run that did not complete within the 2,500 node limit are marked with these symbols, and a matching footnote contains the number of trials that exceeded the limit.
+Each run stops at 2,500 explored nodes. A run that stops unsolved counts as 2,500 nodes, and its score gets \* (model) or † (heuristic). A footnote gives the number of these runs.
 
 The frontier holds a maximum of 255 states. If it holds more, the search drops states at random. [The frontier limit of 255 states](#the-frontier-limit-of-255-states) gives the details.
 
@@ -133,11 +131,9 @@ The frontier holds a maximum of 255 states. If it holds more, the search drops s
 | `rush_hour` | `blocking_cars` | a 6 × 6 board of vehicles | a random board with the red car and a maximum of 10 other vehicles, at least 6 moves from the solution |
 | `keys_doors` | `locked_doors` | the current room, the keys and the open doors | a random building with 10 doors, at least 12 moves from the exit |
 
-All scores use the same scale, where 1.0 is perfect. But some domains are harder than others, so compare scores from two different domains with care.
+Some domains are harder than others, so compare scores from two different domains with care.
 
 `benchmarks.toml` holds the exact settings of each version.
-
-Data sources: [Wikispeedia](https://snap.stanford.edu/data/wikispeedia.html) (West and Leskovec), and the word list of Knuth's Stanford GraphBase.
 
 ## Quick start
 
@@ -154,8 +150,6 @@ uv run python -m beelinebench report
 > [!CAUTION]
 > `run` sends paid API requests. The model sends one request for each node that it explores.
 
-[Usage](docs/usage.md) gives the full steps, the configuration, and the commands.
-
 ## Documentation
 
 | page | what it gives |
@@ -166,7 +160,6 @@ uv run python -m beelinebench report
 | [Price estimates](docs/costs.md) | the estimated price of a mini run and a full run of each hosted model |
 | [Model quirks](docs/model-quirks.md) | the behavior of the models and APIs that can change a score, and the rule for each |
 | [Run Clef on your own GPU](docs/clef-local.md) | how to serve Clef and Clef-flash locally, with no API key |
-| [How to contribute](CONTRIBUTING.md) | how to add a model, a problem, a protocol, or a benchmark version |
 | [Changelog](CHANGELOG.md) | the changes of each version of the code and of the benchmark |
 
 ## Limitations
@@ -177,7 +170,7 @@ BeelineBench has four known limitations. Each one can change a score.
 
 A Jev question holds a maximum of 255 options. The search sends the full frontier as one question, so the frontier holds a maximum of 255 states. When the frontier holds more than 255 states, the search drops states at random until 255 states remain.
 
-The heuristic arm, the oracle arm, and the model arm use the same rule. Each arm has its own seeded draws, so a trial drops the same states on each machine. The search forgets a dropped state, so it can find that state again later.
+The heuristic arm, the oracle arm, and the model arm use the same rule, each with its own seeded draws. The search forgets a dropped state, so it can find that state again later.
 
 A long search fills the frontier. A Wikipedia article with many links also fills it quickly. For example, "United States" has 294 links. When the limit drops a state of the shortest path, a perfect chooser explores more states. The oracle score shows this effect. In benchmark 1.0.0, the oracle score is 1.000 for each domain except `wikispeedia`, where it is 0.987.
 
@@ -187,10 +180,10 @@ OpenAI's Decisions API accepted a question with 255 options in a test on 2026-10
 
 A decision model can give a different answer when it gets the same options in a different form. Two examples are known:
 
-- **The order of the options.** Jev prefers options near the start of a list. Thus, the chooser puts the options in a new random order for each question. The order comes from seeded draws for each trial and model, so the order is the same on each machine.
+- **The order of the options.** Jev prefers options near the start of a list. Thus, the chooser puts the options in a new random order for each question. The order comes from seeded draws for each trial and model.
 - **The text of the options.** [JevChat](https://github.com/kyle-pena-nlp/jevchat) uses Jev to write text one symbol at a time. Its author found that Jev chooses much better when each option is the full text so far, not the next symbol alone.
 
-BeelineBench writes the states of a domain in one fixed form. A different form, for example a board as a grid and not as one line, can give a different score. Thus, a score measures a model together with the form of the states, not the model alone. [Representation sensitivity](docs/benchmarks/1.0.0-representation-sensitivity.md) and [order sensitivity](docs/benchmarks/1.0.0-order-sensitivity.md) measure these effects on one problem.
+BeelineBench writes the states of a domain in one fixed form. A different form, for example a board as a grid and not as one line, can give a different score. Thus, a score measures a model together with the form of the states, not the model alone. The [sensitivity studies](#sensitivity-studies) measure these effects on one problem.
 
 ### Some APIs have no seed
 
@@ -198,7 +191,7 @@ The Jev protocol accepts only the fields `model`, `state`, and `questions`. It r
 
 Identical requests can give different probabilities. In one test, the top option of Jev got 0.78, 0.78, and 0.83 in three calls. A different choice early in a search changes the remainder of the search. Thus, a second run of the same trial can give a different score.
 
-BeelineBench fixes its own random values: the trials, the option order, and the dropped states. It cannot fix the answers of the model, so the results are not fully deterministic. The 95% interval does not include this variation. [Repeatability](docs/benchmarks/1.0.0-repeatability.md) measures it on one problem.
+BeelineBench fixes its own random values: the trials, the option order, and the dropped states. It cannot fix the answers of the model, so the results are not fully deterministic. The 95% interval does not include this variation. The repeatability study under [Sensitivity studies](#sensitivity-studies) measures it on one problem.
 
 ### The models and their APIs have quirks
 
@@ -226,7 +219,7 @@ If you use BeelineBench, cite it as follows. Give the benchmark version that you
   author  = {Pena, Kyle},
   title   = {{BeelineBench}: How Efficiently Do Decision Models Navigate Multi-Step Problems?},
   year    = {2026},
-  version = {1.0.0},
+  version = {1.0.1},
   note    = {Benchmark 1.0.0},
   url     = {https://github.com/kyle-pena-nlp/beelinebench}
 }
