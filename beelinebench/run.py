@@ -181,13 +181,39 @@ def from_start(problem: Problem) -> dict:
     return seen
 
 
-def tally_trace(steps: list[dict]) -> dict:
-    """The :class:`Tally` result of the steps of a trace file."""
-    tally = Tally({})
-    for s in steps:
-        if not s["forced"] and s["best_distance"] is not None:
-            tally.add(s["chosen_distance"], s["best_distance"])
-    return tally.result()
+def replay(problem: Problem, rules: Benchmark, steps: list[dict], model: str,
+           tally: "Tally") -> bool:
+    """Run the model arm again from the steps of its trace, and give each step to ``tally``.
+
+    The search takes the state that the trace names at each step, and drops the states
+    that the model arm dropped, so the frontiers are those of the run. It sends no request.
+    False when the trace does not fit the problem, for example after a change of its text.
+    """
+    chosen = iter(s["chosen"] for s in steps)
+
+    class Mismatch(Exception):
+        pass
+
+    def choose(states) -> int:
+        names = [problem.render(s) for s in states]
+        name = next(chosen)
+        if name not in names:
+            raise Mismatch(name)
+        return names.index(name)
+
+    def step(states, index, state, forced) -> None:
+        if forced:
+            next(chosen)
+        tally(states, index, state, forced)
+
+    try:
+        best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
+                   choose=choose, max_expansions=len(steps), max_frontier=rules.max_frontier,
+                   evict=Draws(problem.domain, problem.trial, "evict", "model", model),
+                   step=step)
+    except (Mismatch, StopIteration):
+        return False
+    return True
 
 
 def both(*steps):

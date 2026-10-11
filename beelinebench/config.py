@@ -84,7 +84,7 @@ class Config:
     benchmarks: dict[str, Benchmark]
     #: ``run --mini``. ``None`` when the config has no ``[mini]`` table.
     mini: MiniConfig | None = None
-    #: ``case-study``. ``None`` when the config has no ``[case_study]`` table.
+    #: ``case-study``. ``None`` when the config has no ``[sensitivity]`` table.
     case_study: "CaseStudyConfig | None" = None
 
 
@@ -121,18 +121,19 @@ def load(path: Path, officials: dict[str, Benchmark]) -> Config:
         choosers=choosers, benchmarks=customs,
         mini=MiniConfig(trials=data["mini"]["trials"], choosers=tuple(data["mini"]["choosers"]))
         if "mini" in data else None,
-        case_study=case_study(data["case_study"], choosers) if "case_study" in data else None)
+        case_study=case_study(data["sensitivity"], choosers) if "sensitivity" in data else None)
 
 
 def case_study(table: dict, choosers: dict) -> "CaseStudyConfig":
     from .case_study import CaseStudyConfig
 
-    if table["chooser"] not in choosers:
-        raise ConfigError(f"case_study: no chooser {table['chooser']!r}")
-    return CaseStudyConfig(chooser=table["chooser"], domain=table["domain"],
+    unknown = [c for c in table["choosers"] if c not in choosers]
+    if unknown:
+        raise ConfigError(f"sensitivity: no chooser {', '.join(unknown)}")
+    return CaseStudyConfig(choosers=tuple(table["choosers"]), domain=table["domain"],
                            trials=table["trials"],
                            representations=tuple(table["representations"]),
-                           orders=tuple(table["orders"]))
+                           orders=tuple(table["orders"]), repeats=table.get("repeats", 3))
 
 
 def unpublished(choosers: dict[str, ChooserConfig]) -> set[str]:
@@ -140,11 +141,30 @@ def unpublished(choosers: dict[str, ChooserConfig]) -> set[str]:
     return {c.name for c in choosers.values() if not c.publish}
 
 
-def setting(name: str, env_file: Path) -> str | None:
-    """A value from ``env_file``, or from the environment."""
+#: The folder of the secret files of Docker, Docker Compose and many Kubernetes setups.
+SECRETS = Path("/run/secrets")
+
+
+def setting(name: str, env_file: Path, secrets: Path = SECRETS) -> str | None:
+    """The value of ``name``, from the first place that has it:
+
+    1. ``env_file`` (the ``.env`` file of the project).
+    2. The environment variable ``name``.
+    3. The file that the environment variable ``<name>_FILE`` names.
+    4. The file ``<secrets>/<name>``, where Docker and Compose put a secret.
+
+    A value from a file loses the white space at its ends. A file keeps a key out of the
+    environment of a container, so ``docker inspect`` does not show it.
+    """
     from dotenv import dotenv_values
 
-    return dotenv_values(env_file).get(name) or os.environ.get(name)
+    found = dotenv_values(env_file).get(name) or os.environ.get(name)
+    if found:
+        return found
+    for path in (os.environ.get(f"{name}_FILE"), secrets / name):
+        if path and Path(path).is_file():
+            return Path(path).read_text().strip() or None
+    return None
 
 
 def expand(text: str, env_file: Path) -> str:

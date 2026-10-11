@@ -5,3 +5,6 @@ __pycache__/
 .spend/
 traces/
 archive/
+
+secrets/
+dist/

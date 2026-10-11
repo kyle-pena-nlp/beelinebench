@@ -4,22 +4,17 @@
 
 BeelineBench measures how well a decision model "plans ahead" when solving a multi-step problem.  A model that navigates more directly to a solution ("beelines") receives a higher score.
 
-Models are compared against one another and also against classic model-free heuristics and a random-choice baseline.  
+In this benchmark, decision models are compared against one another, against classic model-free heuristics, and against a random-choice baseline.  
 
-Classic state-space search (for example: A*) will almost certainly remain the most sensible and economically efficient technique to solve most of these problem domains.  The purpose of this benchmark is to evaluate the multi-step reasoning abilities of decision models, rather than to suggest that decision models should be used as a substitute for classic techniques.  
+Classic state-space search (for example: A*) __will almost certainly remain the most efficient technique to solve most of the included problem domains__.  The purpose of this benchmark is to evaluate the multi-step reasoning abilities of decision models, rather than to suggest that decision models should be used as a substitute for classic techniques.
 
-## Benchmark (Higher is Better)
+Beeline Bench is configuration-driven and [ready to integrate with your benchmarking suite](docs/lab-integration.md).
 
-Latest: {{ latest_benchmark_link }}
+## Beeline Score {{ latest_benchmark }}
 
 {{ results_figure }}
 
 [All benchmark versions and their score figures](docs/benchmarks/README.md#scores)
-
-### Commentary
-
-{{ commentary }}
-
 
 ### Efficient Frontier for Score and Cost
 
@@ -31,19 +26,23 @@ Latest: {{ latest_benchmark_link }}
 
 {{ choices_figure }}
 
-[All benchmark versions and their choice figures](docs/benchmarks/README.md#choices-against-the-oracle)
+[All benchmark versions and their figures of optimal choices](docs/benchmarks/README.md#optimal-choices)
 
-The score measures a full search. This figure measures each choice. At each step with two or more open states, a choice matches the oracle when it takes a state with the fewest moves to the goal. The oracle regret of a choice is the extra moves to the goal from the chosen state. The page of each benchmark gives the mean regret for each model and problem.
+### Sensitivity studies
 
-### Robustness case study
+Three studies measure how much the score of {{ study_models }} changes on one problem:
 
-The {{ case_study_link }} measures how the text of the states and the order of the options change the score of one model on one problem.
+{{ study_links }}
+
+### Commentary on {{ latest_benchmark }}
+
+{{ commentary_link }}
 
 ## How It Works
 
 BeelineBench uses the model as the ranker of the frontier in a best-first search. At each step, the search sends all open states to the model in one request. The search stops when it finds the goal.
 
-A score of 1.0 is perfect - the model navigated to the solution in a minimum number of steps. A score of 0.1 means that the model explored ten times as many nodes as necessary. The score of a domain is the geometric mean over its trials, with a 95% interval over 100 random trials from the problem domain.
+A beeline score of 1.0 is perfect - the model navigated to the solution in a minimum number of steps. A score of 0.1 means that the model explored ten times as many nodes as necessary. The score of a domain is the geometric mean over its trials, with a 95% interval over 100 random trials from the problem domain.
 
 The score is the number of nodes in the shortest path to the solution divided by the number of nodes that the model explores:
 
@@ -54,15 +53,16 @@ score = (shortest path + 1) / nodes explored with the model
 
 Before the search, a breadth-first search finds a shortest path to the goal.
 
-The table shows three other columns on the same trials:
+BeelineBench also gives other measures on the same trials:
 
-| column | what it is |
-|---|---|
-| heuristic score | the same score for the classic heuristic of the domain. A model is better than the heuristic when its score is higher. |
-| oracle score | the same score for a chooser that knows the true distance to the goal. It is below 1.0 only when the frontier limit drops a state of the shortest path. |
-| random choice | the same score for a chooser that takes a state of the frontier at random. It is the floor: a model below it has choices that carry no information. The figure shows it as an open circle. |
-| path score | the shortest path divided by the length of the path that the model found, over the trials that it solved. 1.0 means that the model's path is a shortest path. |
-| refusals | the share of the model's requests that it refused. Only OpenAI's Decisions API refuses. The chooser then asks once more with the options in a new order, and if that is refused too, it takes the first option. |
+| measure | what it is | where |
+|---|---|---|
+| heuristic score | the same score for the classic heuristic of the domain. A model is better than the heuristic when its score is higher. | the score figure, and the page of each benchmark |
+| random choice | the same score for a chooser that takes a state of the frontier at random. It is the floor: a model below it has choices that carry no information. The figures show it as an open circle. | the score figure, and the page of each benchmark |
+| optimal choices | the percent of decisions that took a state on a shortest path, averaged over the trials. A decision counts when the frontier has a state on a shortest path and a state that is not. | the optimal choices figure, and the page of each benchmark |
+| oracle score | the same score for a chooser that knows the true distance to the goal. It is below 1.0 only when the frontier limit drops a state of the shortest path. | `report` |
+| path score | the shortest path divided by the length of the path that the model found, over the trials that it solved. 1.0 means that the model's path is a shortest path. | `report` |
+| refusals | the share of the model's requests that it refused. Only OpenAI's Decisions API refuses. The chooser then asks once more with the options in a new order. If the API refuses that question too, the chooser takes the first option of the new order. | `report`, and [Model quirks](docs/model-quirks.md) |
 
 All benchmark evaluations are capped at {{ max_expansions }} explored nodes. Model-based runs that did not find a solution within {{ max_expansions }} explored nodes are marked with an asterisk (*) on the score. Heuristic-based runs that did not find a solution within {{ max_expansions }} explored nodes are marked with an obelus (†) on the heuristic score. A capped run counts as {{ max_expansions }} explored nodes.
 
@@ -72,13 +72,15 @@ The frontier holds a maximum of 255 states. If it holds more, the search drops s
 
 ## How to run
 
-1. Install the dependencies. The `llm` extra adds the Anthropic SDK.
+These steps run BeelineBench from a clone of the repository. You can also install it as a package, and then run `beelinebench init` in an empty folder. BeelineBench is not on PyPI yet, so install it from GitHub: `pip install "beelinebench[plot] @ git+https://github.com/kyle-pena-nlp/beelinebench"`. [Integrate BeelineBench with your evaluation suite](docs/lab-integration.md) gives the details, and also shows how to run it in a container.
+
+1. Install the dependencies. The `plot` extra draws the figures. The `llm` extra adds the Anthropic SDK, for the `haiku` reference only.
 
    ```bash
-   uv sync --extra llm
+   uv sync --extra plot
    ```
 
-2. Download the data for the `word_ladder` and `wikispeedia` domains.
+2. Optional: download the data for the `word_ladder` and `wikispeedia` domains. A run also downloads the data of a domain when it needs it. Each download checks the SHA-256 of the data.
 
    ```bash
    uv run python -m beelinebench download
@@ -92,10 +94,10 @@ The frontier holds a maximum of 255 states. If it holds more, the search drops s
    uv run python -m beelinebench baseline
    ```
 
-5. Run the benchmark, then print the report.
+5. Run the mini benchmark, then print the report.
 
    ```bash
-   uv run python -m beelinebench run
+   uv run python -m beelinebench run --mini
    uv run python -m beelinebench report
    ```
 
@@ -103,7 +105,7 @@ CAUTION: `run` sends paid API requests. The model sends one request for each nod
 
 ### Run the mini benchmark
 
-The mini benchmark is a small run that needs one API key. It runs the first {{ mini_trials }} trials of each domain with two fast models from Perplexity: pplx-decider 1.1 and pplx-decider 1.0. Trial n is the same trial as in the full benchmark.
+The mini benchmark is a small run. By default, it needs one API key, and it runs the first {{ mini_trials }} trials of each domain with two fast models from Perplexity: {{ mini_models }}. Trial n is the same trial as in the full benchmark.
 
 1. Do steps 1 and 2 above.
 
@@ -116,16 +118,28 @@ The mini benchmark is a small run that needs one API key. It runs the first {{ m
    uv run python -m beelinebench readme
    ```
 
-[Price estimates](docs/costs.md) gives the price of a mini run. [The mini benchmarks](docs/benchmarks/mini/README.md) shows the mini results of each version, as figures and as tables. The `[mini]` table of `beelinebench.toml` sets the trials and the models.
+[Price estimates](docs/costs.md) gives the price of a mini run. [The mini benchmarks](docs/benchmarks/mini/README.md) shows the mini results of each version, as figures and as tables.
+
+NOTE: You can change what the mini benchmark runs. The `[mini]` table of `beelinebench.toml` sets the trials and the models. For example, this table runs 10 trials with two models from OpenRouter:
+
+```toml
+[mini]
+trials = 10
+choosers = ["mercury-decide", "d1"]
+```
+
+Each model must have a table in `beelinebench.toml`, and you need the key of its provider. If the models come from more than one provider, you need a key for each provider.
 
 ### Configuration
 
-`beelinebench.toml` sets the benchmark version and the models (choosers) that `run` uses:
+`beelinebench.toml` sets the benchmark version, the models (choosers) that `run` uses, and the cost limits:
 
 ```toml
 [run]
 benchmark = "1.0.0"
 choosers = ["jev-1.13", "haiku"]
+max_cost = 35.0           # US dollars: the most that one model can cost, over all runs
+max_total_cost = 165.0    # US dollars: the most that all models together can cost
 
 [chooser."jev-1.13"]
 protocol = "jev"
@@ -135,6 +149,22 @@ api_key_env = "TYPESAFE_API_KEY"
 max_requests = 200000
 max_input_tokens = 714000000
 ```
+
+Each run stops before a request that starts above a limit. `.spend/<chooser>.json` holds the cost of each model over all runs.
+
+A chooser table can also have these settings:
+
+| setting | what it does |
+|---|---|
+| `label` | the name of the model in the figures and tables |
+| `endpoint` | the path after `api_base`. The default is `systemone`. |
+| `served` | the model name that each answer must give, when the API answers with a different name, for example a dated name |
+| `price_input`, `price_output` | US dollars for one million input and output tokens. The cost limits and the price estimates use them. |
+| `max_cost` | the cost limit of this model. It replaces `[run] max_cost`. |
+| `trials` | the trials of this model, for example 5 for a pilot |
+| `publish` | `false` leaves the model out of the README, the figures, and the benchmark pages. Its results stay in `results/`. |
+
+The `[mini]` table sets [the mini benchmark](#run-the-mini-benchmark). The `[sensitivity]` table sets the models, the domain, and the conditions of the sensitivity studies.
 
 Command-line flags replace the values in the file for one run:
 
@@ -146,11 +176,18 @@ Other commands:
 
 | command | what it does |
 |---|---|
+| `init` | Writes a `beelinebench.toml` to start from, in the working folder. |
+| `download` | Downloads the data of the domains that need it. |
+| `baseline` | Runs the heuristic and the oracle alone. Sends no requests. |
 | `benchmarks` | Lists the official benchmark versions. |
 | `choosers` | Lists the choosers in `beelinebench.toml`. |
 | `probe` | Sends one question with 255 options to a chooser, and shows the answer. Spends one or two requests. |
-| `report` | Prints the scores, the share of solved trials, the served model, and the request times. |
-| `plot` | Draws the scores of a benchmark to `docs/benchmarks/<version>.png`, one row for each model in each domain, with the 95% interval. It also draws the score against the cost of a step to `docs/benchmarks/<version>-frontier.png`. Needs `uv sync --extra plot`. |
+| `report` | Prints the scores, the share of solved trials, the served model, and the request times. `--json` gives the same data as JSON. |
+| `fill` | Adds the random arm and the counts of optimal choices to old results, from their traces. Sends no requests. |
+| `case-study` | Runs the sensitivity studies of the `[sensitivity]` table. Spends money. |
+| `agreement` | Sends the traced questions of one chooser to a second chooser, with the same options in the same order, and compares the choices. Records nothing. |
+| `plot` | Draws the figures of a benchmark to `docs/benchmarks/`: the scores, the score against the cost, the optimal choices, and the oracle regret. Needs `uv sync --extra plot`. |
+| `readme` | Writes this README, the benchmark pages, and the figures from the templates and the results. Runs only in a clone. |
 
 ### Choosers
 
@@ -161,12 +198,12 @@ Other commands:
 | `pplx-decider` | Perplexity pplx-decider 1.1 (`pplx-decider-v1.1-27b`) | hosted, Perplexity. Needs `PERPLEXITY_API_KEY`. |
 | `pplx-decider-1` | Perplexity pplx-decider 1.0 (`pplx-decider-v1-27b`) | hosted, Perplexity. Needs `PERPLEXITY_API_KEY`. |
 | `d1` | Liquid d1 (`liquid/d1-20260930`) | hosted, OpenRouter. Needs `OPENROUTER_API_KEY`. |
-| `kev-4b` | Kev 4B, open weights (`jaredpalmer/kev-4b-20260924`) | hosted, OpenRouter (SiliconFlow). Needs `OPENROUTER_API_KEY`. |
+| `kev-4b` | Kev 4B, open weights (`jaredpalmer/kev-4b-20260924`). A pilot, not in the results. | hosted, OpenRouter (SiliconFlow). Needs `OPENROUTER_API_KEY`. |
 | `mercury-decide` | Inception Mercury Decide (`inception/mercury-decide-20260930`) | hosted, OpenRouter. Needs `OPENROUTER_API_KEY`. |
-| `clef` | Cloudflare Clef, 27B (`clef`) | hosted, Cloudflare Workers AI. Needs `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. |
-| `clef-flash` | Cloudflare Clef-flash, 9B (`clef-flash`) | hosted, Cloudflare Workers AI. Needs the same two values. |
+| `clef` | Cloudflare Clef, 27B (`clef`). A pilot, not in the results. | hosted, Cloudflare Workers AI. Needs `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. |
+| `clef-flash` | Cloudflare Clef-flash, 9B (`clef-flash`). A pilot, not in the results. | hosted, Cloudflare Workers AI. Needs the same two values. |
 | `haiku` | Claude Haiku 4.5, as a reference. The README does not show its results. | hosted, Anthropic. Needs `ANTHROPIC_API_KEY`. |
-| `clef-local`, `clef-flash-local` | Clef and Clef-flash on your own GPU | local, ports 8001 and 8002 |
+| `clef-local`, `clef-flash-local` | Clef and Clef-flash on your own GPU, at a fixed revision of the weights | local, ports 8001 and 8002 |
 | `local` | any model that uses the Jev protocol | local, port 8000 |
 
 A choice model uses the Jev protocol or OpenAI's Decisions API. Jev serves the Jev protocol at `{api_base}/systemone`. Perplexity serves it at `/v1/decisions`, Cloudflare serves it at the name of the model, and OpenRouter serves it at `/api/alpha/decisions` for models of many publishers. OpenAI's Decisions API is at `{api_base}/decisions`. Both get one choice question over the whole frontier, and the chooser takes the option with the highest probability. Each response must name the model that was asked for, or the run stops. If your model is a Python function, `beelinebench.serve` puts it on a local port:
@@ -179,44 +216,7 @@ The function gets the request body (a dict) and returns the response body (a dic
 
 ### Run Clef on your own GPU
 
-Cloudflare Workers AI hosts Clef and Clef-flash, and the `clef` and `clef-flash` choosers use that service. You can also run the models on your own GPU, with the `clef-local` and `clef-flash-local` choosers. `examples/clef.py` loads the model from Hugging Face and serves it with `beelinebench.serve`.
-
-| model | parameters | memory in bfloat16 | chooser | port |
-|---|---|---|---|---|
-| Clef | 27B | about 55 GB | `clef-local` | 8001 |
-| Clef-flash | 9B | about 19 GB | `clef-flash-local` | 8002 |
-
-The model cards test on one H200 GPU. An 80 GB GPU holds both models. A Mac with 24 GB of memory cannot hold Clef, and Clef-flash on it is slow.
-
-1. On the GPU machine, install BeelineBench with the Clef dependencies.
-
-   ```bash
-   uv sync --extra clef
-   ```
-
-2. Start one server for each model. The first start downloads the model.
-
-   ```bash
-   uv run python -m beelinebench.serve --port 8001 examples.clef:systemone
-   CLEF_REPO=Cloudflare/clef-flash uv run python -m beelinebench.serve --port 8002 examples.clef:systemone
-   ```
-
-3. If the GPU machine is not the machine that runs BeelineBench, forward the ports over SSH. The servers listen only on `127.0.0.1`.
-
-   ```bash
-   ssh -N -L 8001:localhost:8001 -L 8002:localhost:8002 <gpu-host>
-   ```
-
-4. Run the benchmark.
-
-   ```bash
-   uv run python -m beelinebench run --chooser clef-local
-   uv run python -m beelinebench run --chooser clef-flash-local
-   ```
-
-`examples/clef.py` uses `cuda` if it is available, then `mps`, then `cpu`. To select a device, set `CLEF_DEVICE`. Clef does not sample, so identical requests give the same probabilities on the same device.
-
-The `haiku` chooser uses the Anthropic API. It is a reference point, not a choice model. It can reason before it answers, and the choice models cannot. Thus, its score does not measure the same ability. The setting `publish = false` in `beelinebench.toml` keeps its results out of the README figure, the results table, and the price estimates. Its results stay in `results/`, and `report` shows them.
+[Run Clef on your own GPU](docs/clef-local.md) tells you how to serve Clef and Clef-flash on your own machine and run them with no API key.
 
 ### Results files
 
@@ -224,20 +224,23 @@ The `haiku` chooser uses the Anthropic API. It is a reference point, not a choic
 
 If your settings are different from an official benchmark, the results go to `results/custom-<name>/`. `run` lists each setting that is different.
 
-Hosted models can change over time. Each record holds the model name that the API returned (for example `jev-1.13.0`) and the date of the run.
+Hosted models can change over time. Each record holds the model name that the API returned (for example `jev-1.13.0`) and the date of the run. A record also holds the scores of the heuristic arm, the oracle arm, and the random arm, and the counts of optimal choices of each arm. For results from before these values existed, `fill` adds them from the traces.
 
 ### Trace files
 
-`run` also writes the steps of each trial to `traces/<benchmark>/<chooser>/<domain>.<heuristic>/<trial>.jsonl.gz`. Git ignores these files. The first line of a file describes the trial. Each other line is one state that the search explored:
+`run` also writes the steps of each trial to `traces/<benchmark>/<chooser>/<domain>.<heuristic>/<trial>.jsonl.gz`. Git ignores these files. The first line of a file describes the trial: the start, the goal, the shortest path, the result, and the served model names. Each other line is one state that the search explored:
 
 | field | what it is |
 |---|---|
+| `step`, `frontier` | the number of the step, and the number of states on the frontier |
+| `forced` | `true` when the frontier had one state, so the search sent no question |
 | `chosen` | the state that the model chose |
 | `chosen_distance`, `best_distance` | the number of moves to the goal from the chosen state, and from the best state of the frontier |
 | `regret` | `chosen_distance` minus `best_distance`. 0 means that the model chose a best state. |
 | `best_rank` | the place of the best state in the model's order of probability. 0 is first. |
+| `p_chosen` | the probability that the model gave the chosen state |
 | `top` | the 5 states with the highest probability, each with its probability and its distance |
-| `requests`, `input_tokens`, `latencies_ms` | the cost of the step |
+| `requests`, `input_tokens`, `output_tokens`, `latencies_ms` | the cost of the step |
 | `refusals`, `invalid_answers`, `retries` | the intermittent errors of the step |
 
 A trial that ran before the trace files existed has no trace. To make the traces, run the trials again:
@@ -272,6 +275,10 @@ The new run replaces the old run only if the new run has fewer refusals, invalid
 
 [Price estimates](docs/costs.md) gives the estimated price of a run for each hosted model: first a mini run, then a full run.
 
+## Fund the benchmark
+
+Each run of a hosted model costs money. The full runs of the six models in {{ latest_benchmark }} cost about $120 in API fees. The pilots and the sensitivity studies cost about $30 more. The local Clef runs need a rented GPU. To pay for more models and new versions of the benchmark, [sponsor BeelineBench on GitHub](https://github.com/sponsors/kyle-pena-nlp).
+
 ## Benchmarks
 
 Benchmark {{ latest_benchmark }} has {{ domain_count }} domains. Each domain has one heuristic and {{ trials }} trials.
@@ -285,7 +292,7 @@ Benchmark {{ latest_benchmark }} has {{ domain_count }} domains. Each domain has
 | `countdown` | `nearest_number` | the numbers that are left | 4 numbers from 1 to 25, and a target from 10 to 100 |
 | `word_ladder` | `letters_different` | a five-letter word | a random word, and a target at least 5 steps away |
 | `wikispeedia` | `category_distance` | a Wikipedia article title | an article pair from a completed human game, at least 3 clicks apart |
-| `rush_hour` | `blocking_cars` | a 6 × 6 board of vehicles | a random board with 10 vehicles and the red car, at least 6 moves from the solution |
+| `rush_hour` | `blocking_cars` | a 6 × 6 board of vehicles | a random board with the red car and a maximum of 10 other vehicles, at least 6 moves from the solution |
 | `keys_doors` | `locked_doors` | the current room, the keys and the open doors | a random building with 10 doors, at least 12 moves from the exit |
 
 All scores use the same scale, where 1.0 is perfect. But some domains are harder than others, so compare scores from two different domains with care.
@@ -315,7 +322,7 @@ A decision model can give a different answer when it gets the same options in a 
 - **The order of the options.** Jev prefers options near the start of a list. Thus, the chooser puts the options in a new random order for each question. The order comes from seeded draws for each trial and model, so the order is the same on each machine.
 - **The text of the options.** [JevChat](https://github.com/kyle-pena-nlp/jevchat) uses Jev to write text one symbol at a time. Its author found that Jev chooses much better when each option is the full text so far, not the next symbol alone.
 
-BeelineBench writes the states of a domain in one fixed form. A different form, for example a board as a grid and not as one line, can give a different score. Thus, a score measures a model together with the form of the states, not the model alone.
+BeelineBench writes the states of a domain in one fixed form. A different form, for example a board as a grid and not as one line, can give a different score. Thus, a score measures a model together with the form of the states, not the model alone. [Representation sensitivity](docs/benchmarks/{{ latest_benchmark }}-representation-sensitivity.md) and [order sensitivity](docs/benchmarks/{{ latest_benchmark }}-order-sensitivity.md) measure these effects on one problem.
 
 ### Some APIs have no seed
 
@@ -323,11 +330,11 @@ The Jev protocol accepts only the fields `model`, `state`, and `questions`. It r
 
 Identical requests can give different probabilities. In one test, the top option of Jev got 0.78, 0.78, and 0.83 in three calls. A different choice early in a search changes the remainder of the search. Thus, a second run of the same trial can give a different score.
 
-BeelineBench fixes its own random values: the trials, the option order, and the dropped states. It cannot fix the answers of the model, so the results are not fully deterministic. The 95% interval does not include this variation.
+BeelineBench fixes its own random values: the trials, the option order, and the dropped states. It cannot fix the answers of the model, so the results are not fully deterministic. The 95% interval does not include this variation. [Repeatability](docs/benchmarks/{{ latest_benchmark }}-repeatability.md) measures it on one problem.
 
 ## Model quirks
 
-Some behavior of the models and their APIs can change a score. [Model quirks](docs/model-quirks.md) describes each behavior, and the rule that BeelineBench uses for it: the served model, refusals, dated model names, models that BeelineBench cannot use, and errors from the APIs.
+Some behavior of the models and their APIs can change a score. [Model quirks](docs/model-quirks.md) describes each behavior, and the rule that BeelineBench uses for it: the served model, refusals, dated model names, a short context, models that BeelineBench cannot use, and errors from the APIs.
 
 ## How to contribute
 
@@ -356,3 +363,12 @@ If you use BeelineBench, cite it as follows. Give the benchmark version that you
   url     = {https://github.com/kyle-pena-nlp/beelinebench}
 }
 ```
+
+If you publish results on the Wikispeedia domain, also cite the two papers of its dataset: West and Leskovec, "Human Wayfinding in Information Networks" (WWW 2012), and West, Pineau, and Precup, "Wikispeedia: An Online Game for Inferring Semantic Distances between Concepts" (IJCAI 2009).
+
+## License
+
+BeelineBench is licensed under the [Apache License, Version 2.0](LICENSE). [NOTICE](NOTICE) lists the third-party data and its terms:
+
+- The word list of the word ladder domain is from Donald E. Knuth's Stanford GraphBase, which is in the public domain.
+- The Wikispeedia data is from the [Stanford Network Analysis Project](https://snap.stanford.edu/data/wikispeedia.html). SNAP gives no license for it. Thus, BeelineBench and its Docker image do not include it. A run fetches it from SNAP when it needs it.

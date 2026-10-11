@@ -21,8 +21,8 @@ file is out of date.
 
 ![The score against the cost of a step for each model in benchmark 1.0.0, by domain, with the efficient frontier](1.0.0-frontier.png)
 
-## Choices against the oracle
+## Optimal choices
 
 ### Benchmark 1.0.0
 
-![The share of decisions that matched the oracle for each model and heuristic in benchmark 1.0.0, by domain, with 95% intervals](1.0.0-choices.png)
+![The share of decisions that took a state on a shortest path, for each model and heuristic in benchmark 1.0.0, by domain, with 95% intervals](1.0.0-choices.png)

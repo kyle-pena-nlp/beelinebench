@@ -2,8 +2,23 @@
 name = "beelinebench"
 version = "1.0.0"
 description = "How efficiently do decision models navigate multi-step problems?"
-readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dynamic = ["readme"]
 requires-python = ">=3.11"
+authors = [{ name = "Kyle Pena" }]
+keywords = ["benchmark", "evaluation", "decision models", "search", "planning", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = [
     "httpx>=0.27,<1.0",
     "python-dotenv>=1.0,<2.0",
@@ -17,6 +32,13 @@ plot = ["matplotlib>=3.8"]
 # Clef and Clef-flash, served locally by examples/clef.py. The versions are those of the model cards.
 clef = ["torch>=2.11", "transformers>=5.10.2", "huggingface_hub>=0.30", "safetensors>=0.4", "pillow>=10"]
 
+[project.urls]
+Homepage = "https://github.com/kyle-pena-nlp/beelinebench"
+Source = "https://github.com/kyle-pena-nlp/beelinebench"
+Issues = "https://github.com/kyle-pena-nlp/beelinebench/issues"
+Changelog = "https://github.com/kyle-pena-nlp/beelinebench/blob/main/CHANGELOG.md"
+Funding = "https://github.com/sponsors/kyle-pena-nlp"
+
 [project.scripts]
 beelinebench = "beelinebench.__main__:main"
 
@@ -27,5 +49,27 @@ dev = ["pytest>=8.2"]
 testpaths = ["tests"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27", "hatch-fancy-pypi-readme>=24.1"]
 build-backend = "hatchling.build"
+
+# The wheel holds the official benchmarks and a config to start from, because an installed
+# package has no clone around it. See beelinebench/paths.py.
+[tool.hatch.build.targets.wheel.force-include]
+"benchmarks.toml" = "beelinebench/benchmarks.toml"
+"beelinebench.toml" = "beelinebench/beelinebench.toml"
+
+# PyPI shows the README, but it cannot follow a relative link. These substitutions point
+# the images and the links at the repository.
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '!\[([^\]]*)\]\((?!https?://)([^)]+)\)'
+replacement = '![\1](https://raw.githubusercontent.com/kyle-pena-nlp/beelinebench/main/\2)'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\((?!https?://|#|mailto:)([^)]+)\)'
+replacement = '](https://github.com/kyle-pena-nlp/beelinebench/blob/main/\1)'

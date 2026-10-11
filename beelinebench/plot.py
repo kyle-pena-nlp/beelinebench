@@ -45,7 +45,7 @@ TICKS = (0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0)
 
 #: The look of the figures. A change of the look changes this number, so that
 #: ``readme`` draws the figures again.
-STYLE = 29
+STYLE = 32
 
 #: The PNG text key that holds the fingerprint of the rows.
 FINGERPRINT_KEY = "beelinebench-rows"
@@ -138,7 +138,15 @@ def mean_interval(values: list[float], draws: Draws) -> tuple[float, float]:
 
 
 def share(tally: dict) -> float:
-    """The share of the decisions of one arm in one trial that matched the oracle."""
+    """The share of the contested decisions of one arm in one trial that took a state on a
+    shortest path. A decision is contested when the frontier has a state on a shortest path
+    and a state that is not."""
+    return tally["on_path"] / tally["contested"]
+
+
+def matched(tally: dict) -> float:
+    """The share of the decisions of one arm in one trial that matched the oracle: a state
+    with the fewest moves to the goal of the frontier."""
     return tally["optimal"] / tally["decisions"]
 
 
@@ -165,7 +173,7 @@ def choice_tallies(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
             for r in records:
                 references.setdefault(r.trial, r.choices)
             tallies = [r.choices["model"] for r in records
-                       if r.choices.get("model", {}).get("decisions")]
+                       if r.choices.get("model", {}).get("contested")]
             if tallies:
                 arms.append((labels.get(name, name), False, "D", name, tallies))
         if not arms:
@@ -173,7 +181,7 @@ def choice_tallies(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
         for arm, label, marker in (
                 ("heuristic", f"Heuristic: {HEURISTIC_TITLES.get(heuristic, heuristic)}", "D"),
                 ("random", "Random choice", "o")):
-            tallies = [c[arm] for _, c in sorted(references.items()) if c[arm]["decisions"]]
+            tallies = [c[arm] for _, c in sorted(references.items()) if c[arm].get("contested")]
             if tallies:
                 arms.append((label, True, marker, arm, tallies))
         out.append((TITLES.get(domain, domain), stem, arms))
@@ -220,6 +228,8 @@ def fingerprint(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
                        for row in group]]
               for title, group in (choice_rows(b, results, labels, hidden, trials, only)
                                    if kind == "choices"
+                                   else regret_rows(b, results, labels, hidden)
+                                   if kind == "regret"
                                    else rows(b, results, labels, hidden, prices, trials, only))]
     data = json.dumps([STYLE, kind, b.name, b.max_expansions, trials, groups], sort_keys=True)
     return hashlib.sha256(data.encode()).hexdigest()[:16]
@@ -291,7 +301,7 @@ def draw(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
     if "*" in marks or "†" in marks:
         notes += (f"\n* or †: at least one model (*) or heuristic (†) run did not solve within "
                   f"{b.max_expansions:,} nodes, so the true score is lower.")
-    forest(groups, out, title=f"BeelineBench {title_name(b, trials)}",
+    forest(groups, out, title=f"BeelineBench {title_name(b, trials)}: Beeline Score",
            subtitle="The score of each model, heuristic and random choice, by problem. "
                     "Higher is better, and 1.0 is a perfect search.",
            xlabel="score = (shortest path + 1) / nodes explored   ·   log scale, higher is "
@@ -302,26 +312,33 @@ def draw(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
 def draw_choices(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
                  hidden: Collection[str] = (), trials: int | None = None,
                  only: Collection[str] | None = None) -> None:
-    """The share of decisions that matched the oracle, for each arm, by domain."""
+    """The share of contested decisions that took a state on a shortest path, by domain."""
     groups = choice_rows(b, results, labels, hidden, trials, only)
     if not groups:
         raise ValueError(f"no choices for benchmark {b.name}")
-    notes = (f"Benchmark {title_name(b, trials)}. A decision is a step with two or more states "
-             "on the frontier.\nIt matches the oracle when it takes a state with the fewest moves "
-             "to the goal. A mark is the mean over n trials of the share\nof a trial's decisions "
-             "that matched, and a band is its 95% bootstrap interval. An open circle is random "
-             "choice.")
-    forest(groups, out, title=f"BeelineBench {title_name(b, trials)}: choices against the oracle",
-           subtitle="The share of decisions that took a state with the fewest moves to the goal, "
-                    "by problem. Higher is better.",
-           xlabel="share of decisions that matched the oracle", notes=notes, log=False,
+    notes = (f"Benchmark {title_name(b, trials)}. A state is on a shortest path when its moves "
+             "from the start plus its moves to the goal equal a shortest path.\nA decision counts "
+             "when the frontier has a state on a shortest path and a state that is not. A mark is "
+             "the mean over n trials\nof the percent of a trial's counted decisions that took a "
+             "state on a shortest path, and a band is its 95% bootstrap interval. An open circle "
+             "is random choice.")
+    forest(groups, out, title=f"BeelineBench {title_name(b, trials)}: optimal choices",
+           subtitle="How often the search took a state on a shortest path, when it had a state "
+                    "that was not. Higher is better.",
+           xlabel="percent of decisions that took a state on a shortest path", notes=notes,
+           log=False, percent=True,
            stamp=fingerprint(b, results, labels, hidden, kind="choices", trials=trials,
                              only=only))
 
 
 def forest(groups: list[tuple[str, list[Row]]], out: Path, *, title: str, subtitle: str,
-           xlabel: str, notes: str, log: bool, stamp: str) -> None:
-    """Rows of marks and bands, grouped by domain, with a title, notes and a fingerprint."""
+           xlabel: str, notes: str, log: bool, stamp: str, percent: bool = False,
+           xmax: float = 1.15, centre: float | None = 1.0) -> None:
+    """Rows of marks and bands, grouped by domain, with a title, notes and a fingerprint.
+
+    With ``percent``, the values and the axis show percentages. ``xmax`` is the end of a
+    linear axis, and ``centre`` is the place of the vertical line, or ``None`` for no line.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -351,14 +368,17 @@ def forest(groups: list[tuple[str, list[Row]]], out: Path, *, title: str, subtit
         ax.set_xlim(lowest / 1.3, 2.0)
         ax.xaxis.set_major_locator(FixedLocator([t for t in TICKS if t >= lowest / 1.3]))
     else:
-        ax.set_xlim(0, 1.15)
-        ax.xaxis.set_major_locator(FixedLocator([0, 0.2, 0.4, 0.6, 0.8, 1.0]))
+        ax.set_xlim(0, xmax)
+        step = 0.2 if xmax <= 1.2 else max(1, round(xmax / 6))
+        ax.xaxis.set_major_locator(FixedLocator(
+            [round(step * k, 6) for k in range(int(xmax / step) + 1)]))
     ax.set_ylim(height - 0.3, -0.7)
     ax.xaxis.set_minor_locator(NullLocator())
-    ax.xaxis.set_major_formatter(lambda value, _: f"{value:g}")
+    ax.xaxis.set_major_formatter(lambda value, _: f"{100 * value:.0f}%" if percent else f"{value:g}")
     ax.grid(axis="x", color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.axvline(1.0, color=CENTRE, linewidth=1.2)
+    if centre is not None:
+        ax.axvline(centre, color=CENTRE, linewidth=1.2)
 
     for y, row in placed:
         ax.plot([row.low, row.high], [y, y], color=BAND, linewidth=2.2,
@@ -366,8 +386,10 @@ def forest(groups: list[tuple[str, list[Row]]], out: Path, *, title: str, subtit
         ax.plot(row.score, y, marker=row.marker, markersize=7, markeredgewidth=1.5,
                 color=SURFACE if row.marker == "o" else MARK, markeredgecolor=MARK)
         # A surface box keeps the label legible where it crosses the line at 1.0.
-        ax.text(row.high * 1.07 if log else row.high + 0.015, y,
-                f"{score_text(row.score)}{row.marks}", color=TEXT, fontsize=9,
+        value = (f"{100 * row.score:.0f}%" if percent
+                 else f"{row.score:.2f}" if not log else score_text(row.score))
+        ax.text(row.high * 1.07 if log else row.high + 0.013 * xmax, y,
+                f"{value}{row.marks}", color=TEXT, fontsize=9,
                 va="center", bbox=dict(boxstyle="square,pad=0.1", facecolor=SURFACE,
                                        edgecolor="none"))
 
@@ -538,46 +560,106 @@ def draw_frontier(b: Benchmark, results: Path, out: Path, labels: Mapping[str, s
     plt.close(fig)
 
 
-def case_study_rows(study, results: Path, b: Benchmark) -> list[tuple[str, list[Row]]]:
-    """The rows of the case study figure: the representations, then the option orders."""
+def case_study_rows(study, results: Path, b: Benchmark, kind: str,
+                    labels: Mapping[str, str] = {}) -> list[tuple[str, list[Row]]]:
+    """The rows of the figure of study ``kind``: a group for each chooser."""
     from .case_study import lines, summary
 
     heuristic = b.domains[study.domain]["heuristic"]
     groups = []
-    for title, found in lines(study, results, b.name, heuristic):
+    for chooser in study.choosers:
         out = []
-        for line in found:
-            score, low, high = summary(line, (study.chooser, study.domain, title, line.label))
+        for line in lines(study, kind, chooser, results, b.name, heuristic):
+            score, low, high = summary(line, (chooser, study.domain, kind, line.label))
             label = (f"Heuristic: {HEURISTIC_TITLES.get(heuristic, heuristic)}"
                      if line.label == "Heuristic" else line.label)
             out.append(Row(label, score, low, high, len(line.scores), "",
                            reference=line.reference, marker=line.marker))
-        groups.append((title, out))
+        if out:
+            groups.append((labels.get(chooser, chooser), out))
     return groups
 
 
-def case_study_fingerprint(study, results: Path, b: Benchmark, model: str) -> str:
+def case_study_fingerprint(study, results: Path, b: Benchmark, kind: str,
+                           labels: Mapping[str, str] = {}) -> str:
     groups = [[title, [[round(v, 6) if isinstance(v, float) else v for v in astuple(row)]
-                       for row in group]] for title, group in case_study_rows(study, results, b)]
-    data = json.dumps([STYLE, "case-study", b.name, model, groups], sort_keys=True)
+                       for row in group]]
+              for title, group in case_study_rows(study, results, b, kind, labels)]
+    data = json.dumps([STYLE, kind, b.name, study.trials, groups], sort_keys=True)
     return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
-def draw_case_study(study, results: Path, out: Path, b: Benchmark, model: str) -> None:
-    """The score of one model on one problem, for each representation and option order."""
+#: For each study: the subtitle and the note of its figure.
+STUDY_TEXT = {
+    "representation-sensitivity": (
+        "How the text of the states changes the score. Higher is better, and 1.0 is a perfect "
+        "search.",
+        "Each representation uses the random option order of the benchmark."),
+    "order-sensitivity": (
+        "How the order of the options changes the score. Higher is better, and 1.0 is a perfect "
+        "search.",
+        "Each option order uses the representation of the benchmark."),
+    "repeatability": (
+        "The same condition, run again. The APIs take no seed, so two runs can differ. Higher "
+        "is better.",
+        "Each run has the same requests: the representation and the option order of the "
+        "benchmark."),
+}
+
+
+def draw_case_study(study, results: Path, out: Path, b: Benchmark, kind: str,
+                    labels: Mapping[str, str] = {}) -> None:
+    """The score of each chooser on one problem for each condition of study ``kind``."""
+    from .case_study import STUDIES
     from .domains import TITLES
 
-    groups = case_study_rows(study, results, b)
+    groups = case_study_rows(study, results, b, kind, labels)
     if not groups:
-        raise ValueError("no case study results")
+        raise ValueError(f"no results for the study {kind}")
     problem = TITLES.get(study.domain, study.domain)
+    subtitle, note = STUDY_TEXT[kind]
     notes = (f"Benchmark {b.name}, {problem}, trials 1 to {study.trials}. A mark is the geometric "
-             "mean over n trials, and a band is its 95% bootstrap interval.\nEach representation "
-             "uses the random option order of the benchmark, and each option order uses the "
-             "first representation.\nThe heuristic and random choice are the same in each group.")
-    forest(groups, out, title=f"Case study: {model} on {problem}",
-           subtitle="How the text of the states and the order of the options change the score. "
-                    "Higher is better, and 1.0 is a perfect search.",
+             f"mean over n trials, and a band is its 95% bootstrap interval.\n{note} The "
+             "heuristic and random choice are the same for each model.")
+    forest(groups, out, title=f"{STUDIES[kind]}: {problem}", subtitle=subtitle,
            xlabel="score = (shortest path + 1) / nodes explored   ·   log scale, higher is "
                   "better", notes=notes, log=True,
-           stamp=case_study_fingerprint(study, results, b, model))
+           stamp=case_study_fingerprint(study, results, b, kind, labels))
+
+
+def regret_rows(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
+                hidden: Collection[str] = ()) -> list[tuple[str, list[Row]]]:
+    """For each domain: the mean oracle regret of each arm, lowest first.
+
+    The mean regret of a trial is over its decisions that did not take a dead end. A row is
+    the mean over the trials, so each trial counts the same.
+    """
+    groups = []
+    for title, stem, arms in choice_tallies(b, results, labels, hidden):
+        found = []
+        for label, reference, marker, key, tallies in arms:
+            regrets = [m for m in map(mean_regret, tallies) if m is not None]
+            if regrets:
+                low, high = mean_interval(regrets, Draws("bootstrap", b.name, key, stem, "regret"))
+                found.append(Row(label, sum(regrets) / len(regrets), low, high, len(regrets), "",
+                                 reference=reference, marker=marker))
+        groups.append((title, sorted(found, key=lambda row: row.score)))
+    return groups
+
+
+def draw_regret(b: Benchmark, results: Path, out: Path, labels: Mapping[str, str] = {},
+                hidden: Collection[str] = ()) -> None:
+    """The mean oracle regret of each arm, by domain. Lower is better. ``plot`` draws it."""
+    groups = regret_rows(b, results, labels, hidden)
+    if not groups:
+        raise ValueError(f"no choices for benchmark {b.name}")
+    top = max(row.high for _, group in groups for row in group)
+    notes = (f"Benchmark {b.name}. The oracle regret of a decision is the moves to the goal from "
+             "the chosen state, minus the fewest moves to the goal of a state of the frontier.\n"
+             "A mark is the mean over n trials of the mean regret of a trial, and a band is its "
+             "95% bootstrap interval. An open circle is random choice.")
+    forest(groups, out, title=f"BeelineBench {b.name}: oracle regret",
+           subtitle="The extra moves to the goal from each chosen state, by problem. Lower is "
+                    "better, and 0 is the choice of the oracle.",
+           xlabel="mean oracle regret (moves)", notes=notes, log=False, xmax=top * 1.15,
+           centre=None, stamp=fingerprint(b, results, labels, hidden, kind="regret"))

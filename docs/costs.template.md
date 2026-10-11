@@ -20,6 +20,4 @@ The prices come from `price_input` and `price_output` in `beelinebench.toml`. Th
 
 A run stops before a request if the total cost of the model is at its limit. `max_cost` in `beelinebench.toml` sets the limit, and the default is $35 for each model. The file `.spend/<chooser>.json` keeps the total cost of each model over all runs. The total includes trials that stopped before they were complete.
 
-The table does not include local models. A local model has no price for each token, but it needs a GPU. [Run Clef on your own GPU](../README.md#run-clef-on-your-own-gpu) gives the details.
-
-[Back to the README](../README.md)
+The table does not include local models. A local model has no price for each token, but it needs a GPU. [Run Clef on your own GPU](clef-local.md) gives the details.

@@ -149,3 +149,20 @@ def test_every_hosted_chooser_has_a_price():
     for c in config.load(PROJECT / "beelinebench.toml", officials).choosers.values():
         hosted = c.api_base is None or not c.api_base.startswith("http://localhost")
         assert (c.price_input is not None) == hosted, c.name
+
+
+def test_a_key_can_come_from_a_secret_file(tmp_path, monkeypatch):
+    from beelinebench.config import setting
+
+    env_file = tmp_path / ".env"
+    monkeypatch.delenv("SOME_KEY", raising=False)
+    monkeypatch.delenv("SOME_KEY_FILE", raising=False)
+    assert setting("SOME_KEY", env_file, secrets=tmp_path / "none") is None
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets" / "SOME_KEY").write_text("from-docker-secret\n")
+    assert setting("SOME_KEY", env_file, secrets=tmp_path / "secrets") == "from-docker-secret"
+    (tmp_path / "key.txt").write_text("from-file-variable")
+    monkeypatch.setenv("SOME_KEY_FILE", str(tmp_path / "key.txt"))
+    assert setting("SOME_KEY", env_file, secrets=tmp_path / "secrets") == "from-file-variable"
+    monkeypatch.setenv("SOME_KEY", "from-environment")
+    assert setting("SOME_KEY", env_file, secrets=tmp_path / "secrets") == "from-environment"

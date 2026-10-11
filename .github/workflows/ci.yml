@@ -18,3 +18,29 @@ jobs:
       - name: README.md is what README.template.md and the results make
         run: uv run python -m beelinebench readme --check
       - run: uv run pytest
+
+  image:
+    # The image builds, its data passes the SHA-256 checks, and it runs a command that sends
+    # no request.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t beelinebench .
+      - run: docker run --rm beelinebench baseline --domain countdown --trials 3
+
+  package:
+    # The wheel installs into an empty folder and works there, with no clone around it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - run: uvx twine check --strict dist/*
+      - name: install the wheel in an empty folder, and run commands that send no request
+        run: |
+          wheel="$PWD/$(ls dist/*.whl)"
+          mkdir /tmp/empty && cd /tmp/empty
+          uv venv && uv pip install "$wheel"
+          .venv/bin/beelinebench init
+          .venv/bin/beelinebench baseline --domain countdown word_ladder --trials 2
+          .venv/bin/beelinebench report --json

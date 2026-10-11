@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from .benchmark import Benchmark
 from .rng import Draws
+from .case_study import STUDIES
 from .run import read, summarise
 
 if TYPE_CHECKING:
@@ -35,8 +36,8 @@ OUTPUT = "README.md"
 #: uses no figure placeholder.
 PAGES = ((TEMPLATE, OUTPUT), ("docs/model-quirks.template.md", "docs/model-quirks.md"),
          ("docs/costs.template.md", "docs/costs.md"),
-         ("docs/benchmarks/robustness-case-study.template.md",
-          "docs/benchmarks/{latest}-robustness-case-study.md"),
+         *((f"docs/benchmarks/{kind}.template.md", f"docs/benchmarks/{{latest}}-{kind}.md")
+           for kind in ("representation-sensitivity", "order-sensitivity", "repeatability")),
          ("CONTRIBUTING.template.md", "CONTRIBUTING.md"))
 
 HEADER = ("<!-- Made by `python -m beelinebench readme` from {}. "
@@ -183,9 +184,9 @@ def price(c: ChooserConfig) -> str:
     return f"{dollars(c.price_input)} input, {out}"
 
 
-#: The page and the figure of the robustness case study of a benchmark, from the project root.
-CASE_STUDY_PAGE = "docs/benchmarks/{}-robustness-case-study.md"
-CASE_STUDY_FIGURE = "docs/benchmarks/{}-robustness-case-study.png"
+#: The page and the figure of each sensitivity study of a benchmark, from the project root.
+STUDY_PAGE = "docs/benchmarks/{}-{}.md"
+STUDY_FIGURE = "docs/benchmarks/{}-{}.png"
 
 
 def pages(officials: dict[str, Benchmark]) -> list[tuple[str, str]]:
@@ -194,20 +195,19 @@ def pages(officials: dict[str, Benchmark]) -> list[tuple[str, str]]:
     return [(source, out.format(latest=latest)) for source, out in PAGES]
 
 
-def case_study_table(officials: dict[str, Benchmark], results: Path, study,
-                     model: str) -> str:
-    """The rows of the case study figure as tables, one for each group."""
+def study_table(officials: dict[str, Benchmark], results: Path, study, kind: str,
+                labels: Mapping[str, str]) -> str:
+    """The rows of the figure of study ``kind`` as tables, one for each model."""
     from .domains import TITLES
     from .plot import case_study_rows, score_text
 
     if study is None:
-        return "The config has no case study."
-    groups = case_study_rows(study, results, officials[list(officials)[-1]])
+        return "The config has no sensitivity studies."
+    groups = case_study_rows(study, results, officials[list(officials)[-1]], kind, labels)
     if not any(row.trials for _, group in groups for row in group if not row.reference):
-        return "No case study results yet. Run `uv run python -m beelinebench case-study`."
-    out = [f"The model is {model}, and the problem is "
-           f"{TITLES.get(study.domain, study.domain)}, trials 1 to {study.trials}. The rows are "
-           "in the order of the figure, best first.\n"]
+        return "No results yet. Run `uv run python -m beelinebench case-study`."
+    out = [f"The problem is {TITLES.get(study.domain, study.domain)}, trials 1 to "
+           f"{study.trials}. The rows are in the order of the figure.\n"]
     for title, group in groups:
         lines = [f"#### {title}\n", "| | trials | score | 95% interval |", "|---|---|---|---|"]
         lines += [f"| {row.label} | {row.trials} | {score_text(row.score)} | "
@@ -218,10 +218,17 @@ def case_study_table(officials: dict[str, Benchmark], results: Path, study,
 
 #: The page of a benchmark, from the project root.
 PAGE = "docs/benchmarks/{}.md"
-#: The hand-written commentary of a benchmark, from the project root. It can hold
-#: placeholders, and it uses no headings and no relative links, because the README and the
-#: page of the benchmark both show it.
-COMMENTARY = "docs/benchmarks/{}-commentary.md"
+#: The hand-written commentary of a benchmark, from the project root, and the page that
+#: ``readme`` makes from it. The commentary can hold placeholders. Its links are relative
+#: to docs/benchmarks/, where the page is.
+COMMENTARY = "docs/benchmarks/{}-commentary.template.md"
+COMMENTARY_PAGE = "docs/benchmarks/{}-commentary.md"
+
+
+def commentary_page(name: str, body: str) -> str:
+    """The page of the commentary of benchmark ``name``."""
+    return (HEADER.format(COMMENTARY.format(name)) + f"# Commentary: benchmark {name}\n\n"
+            f"{body}\n\n[The page of benchmark {name}]({name}.md)\n")
 
 
 def refusal_share(b: Benchmark, results: Path, argument: str, fallback: bool) -> str:
@@ -302,31 +309,25 @@ def results_section(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
 def choices_section(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
                     hidden: Collection[str] = (), trials: int | None = None,
                     only: Collection[str] | None = None) -> str:
-    """The choices figure of ``b``, and its data as tables, with the oracle regret."""
-    from .plot import choice_tallies, mean_regret, share
+    """The optimal choices figure of ``b``, and its data as tables."""
+    from .plot import choice_rows
 
-    found = choice_tallies(b, results, labels, hidden, trials, only)
-    if not found:
+    groups = choice_rows(b, results, labels, hidden, trials, only)
+    if not groups:
         return ""
-    out = [f"![The share of decisions that matched the oracle for each model and heuristic in "
-           f"benchmark {b.name}, by domain, with 95% intervals]({b.name}-choices.png)\n\n"
-           "### Choices against the oracle as text\n\n"
-           "A decision is a step with two or more states on the frontier, and at least one of "
-           "them can reach the goal. The oracle regret of a decision is the moves to the goal "
-           "from the chosen state, minus the fewest moves from a state of the frontier. So an "
-           "optimal choice has a regret of 0. A dead end is a chosen state that cannot reach the "
-           "goal. Each column is a mean over trials, so each trial counts the same.\n"]
-    for title, _, arms in found:
-        lines = [f"#### {title}\n",
-                 "| | trials | matched the oracle | mean regret | dead ends |", "|---|---|---|---|---|"]
-        ranked = sorted(arms, key=lambda arm: -sum(map(share, arm[4])) / len(arm[4]))
-        for label, _, _, _, tallies in ranked:
-            regrets = [m for m in map(mean_regret, tallies) if m is not None]
-            dead = sum(t["dead_ends"] / t["decisions"] for t in tallies) / len(tallies)
-            lines.append(f"| {label} | {len(tallies)} | "
-                         f"{100 * sum(map(share, tallies)) / len(tallies):.0f}% | "
-                         f"{sum(regrets) / len(regrets):.2f} | {100 * dead:.1f}% |"
-                         if regrets else f"| {label} | {len(tallies)} | — | — | — |")
+    out = [f"![The percent of decisions that took a state on a shortest path, for each model and "
+           f"heuristic in benchmark {b.name}, by domain, with 95% intervals]({b.name}-choices.png)"
+           "\n\n### Optimal choices as text\n\n"
+           "A state is optimal when it is on a shortest path: its moves from the start plus its "
+           "moves to the goal equal the length of a shortest path. A decision counts when the "
+           "frontier has an optimal state and a state that is not optimal. The percent is the "
+           "mean over trials of the percent of the counted decisions that took an optimal state, "
+           "so each trial counts the same.\n"]
+    for title, group in groups:
+        lines = [f"#### {title}\n", "| | trials | chose an optimal state | 95% interval |",
+                 "|---|---|---|---|"]
+        lines += [f"| {row.label} | {row.trials} | {100 * row.score:.0f}% | "
+                  f"{100 * row.low:.0f}% to {100 * row.high:.0f}% |" for row in group]
         out.append("\n".join(lines) + "\n")
     return "\n".join(out)
 
@@ -389,8 +390,8 @@ def placeholders(officials: dict[str, Benchmark], results: Path,
             f"![The scores of each model and heuristic in benchmark {official(argument).name}, "
             f"by domain, with 95% intervals]({FIGURE.format(official(argument).name)})"),
         "choices_figure": lambda argument: (
-            f"![The share of decisions that matched the oracle for each model and heuristic in "
-            f"benchmark {official(argument).name}, by domain, with 95% intervals]"
+            f"![The percent of decisions that took a state on a shortest path, for each model and "
+            f"heuristic in benchmark {official(argument).name}, by domain, with 95% intervals]"
             f"({FIGURES['choices_figure'].format(official(argument).name)})"),
         "frontier_figure": lambda argument: (
             f"![The score against the cost of a step for each model in benchmark "
@@ -409,11 +410,19 @@ def placeholders(officials: dict[str, Benchmark], results: Path,
             official(argument), results, choosers or {},
             trials=mini.trials if mini else None, only=set(mini.choosers) if mini else set()),
         "mini_trials": lambda argument: str(mini.trials if mini else 0),
-        "case_study": lambda argument: case_study_table(
-            officials, results, study,
-            (choosers or {})[study.chooser].title if study and choosers else ""),
-        "case_study_link": lambda argument: (
-            f"[robustness case study]({CASE_STUDY_PAGE.format(official(argument).name)})"),
+        "mini_models": lambda argument: " and ".join(
+            (choosers or {})[c].title if choosers and c in choosers else c
+            for c in (mini.choosers if mini else ())),
+        # The argument is a study, for example \{{ study order-sensitivity }}.
+        "study": lambda argument: study_table(
+            officials, results, study, argument,
+            {c.name: c.title for c in (choosers or {}).values()}),
+        "study_links": lambda argument: "\n".join(
+            f"- [{title}]({STUDY_PAGE.format(official(None).name, kind)})"
+            for kind, title in STUDIES.items()),
+        "study_models": lambda argument: ", ".join(
+            (choosers or {})[c].title if choosers and c in choosers else c
+            for c in (study.choosers if study else ())),
     }
 
 
@@ -445,6 +454,11 @@ def render(template: str, officials: dict[str, Benchmark], results: Path,
     known["commentary"] = lambda argument: (
         commentary(argument or latest, officials, results, choosers, mini)
         or f"No commentary for benchmark {argument or latest} yet.")
+    known["commentary_link"] = lambda argument: (
+        f"[Commentary on benchmark {argument or latest}]"
+        f"({COMMENTARY_PAGE.format(argument or latest)})"
+        if (results.parent / COMMENTARY.format(argument or latest)).exists()
+        else f"No commentary for benchmark {argument or latest} yet.")
 
     def replace(match: re.Match[str]) -> str:
         name, argument = match.group(1), match.group(2)

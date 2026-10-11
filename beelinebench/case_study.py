@@ -1,37 +1,50 @@
-"""A case study of one model on one problem: how the text and the order of the options
-change its score.
+"""Three sensitivity studies of one or more models on one problem.
 
-The ``[case_study]`` table of ``beelinebench.toml`` names the chooser, the domain, the
-trials, the representations and the option orders. Each representation runs with the
-random option order of the benchmark, and each option order runs with the first
-representation. ``python -m beelinebench case-study`` runs the conditions, and ``readme``
-draws the figure and writes ``docs/case-study.md``.
+- Representation sensitivity: the same states in other text.
+- Order sensitivity: the same options in other orders.
+- Repeatability: the same condition again. The APIs take no seed, so two runs of the same
+  requests can differ.
+
+The ``[sensitivity]`` table of ``beelinebench.toml`` names the choosers (an array), the
+domain, the trials, the representations, the option orders and the repeats. Each
+representation runs with the random option order of the benchmark. Each option order and
+each repeat runs with the first representation, which is that of the benchmark.
+``python -m beelinebench case-study`` runs the conditions, and ``readme`` draws a figure and
+writes a page for each study.
 
 The results go to ``results/case-study/<chooser>/<domain>/<condition>.jsonl``, apart from
-the benchmark results. The chooser has its own ledger, ``.spend/<chooser>.case-study.json``,
-so that the case study can run while the chooser runs the benchmark.
+the benchmark results. Each chooser has its own ledger, ``.spend/<chooser>.case-study.json``,
+so that a study can run while the chooser runs the benchmark.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .rng import Draws
-from .run import geometric_mean, interval, read
+from .run import Record, geometric_mean, interval, read
 from .search import Problem
 
 LABEL = "case-study"
 
+#: Each study: its name in file names, and its title.
+STUDIES = {"representation-sensitivity": "Representation sensitivity",
+           "order-sensitivity": "Order sensitivity",
+           "repeatability": "Repeatability"}
+
 
 @dataclass(frozen=True)
 class CaseStudyConfig:
-    chooser: str
+    choosers: tuple[str, ...]
     domain: str
     trials: int
     representations: tuple[str, ...]
     orders: tuple[str, ...]
+    #: The runs of the benchmark condition in all: the benchmark run, the run of the first
+    #: representation, and ``repeats - 2`` more.
+    repeats: int = 3
 
 
 #: Each option order, for a reader.
@@ -70,10 +83,14 @@ class Arrange:
 
 
 def conditions(study: CaseStudyConfig) -> list[tuple[str, str, str]]:
-    """Each condition: its name, its representation, and its option order."""
+    """Each condition: its name, its representation, and its option order.
+
+    A repeat has the same representation and order as the benchmark, and the same seed.
+    """
     first = study.representations[0]
     out = [(f"representation-{r}", r, "random") for r in study.representations]
     out += [(f"order-{o}", first, o) for o in study.orders if o != "random"]
+    out += [(f"repeat-{k}", first, "random") for k in range(3, study.repeats + 1)]
     return out
 
 
@@ -89,71 +106,65 @@ def prepared(problem: Problem, representation: str, order: str, model: str,
         labels[text] = state
         return text
 
-    from dataclasses import replace
     shown = replace(shown, render=remember)
     seed = ("order", model) if order == "random" else ("order", model, order)
     return shown, Arrange(order, Draws(problem.domain, problem.trial, *seed), problem.heuristic,
                           labels)
 
 
-def results_dir(results: Path, study: CaseStudyConfig) -> Path:
-    return results / LABEL / study.chooser / study.domain
+def results_dir(results: Path, chooser: str, study: CaseStudyConfig) -> Path:
+    return results / LABEL / chooser / study.domain
 
 
 @dataclass(frozen=True)
 class Line:
-    """One row of the case study: a condition or a reference arm."""
-    group: str
+    """One row of a study figure: a condition or a reference arm."""
     label: str
     scores: list[float]
     reference: bool = False
     marker: str = "D"
 
 
-def lines(study: CaseStudyConfig, results: Path, benchmark: str,
-          heuristic: str) -> list[tuple[str, list[Line]]]:
-    """The rows of the figure: one group for the representations and one for the orders.
+def lines(study: CaseStudyConfig, kind: str, chooser: str, results: Path, benchmark: str,
+          heuristic: str) -> list[Line]:
+    """The rows of study ``kind`` for one chooser, best first, then the reference arms.
 
-    Each group ends with the reference arms on the same trials. The representation group
-    also has the benchmark run of the chooser on the same trials, if there is one, so the
-    difference between two runs of the same condition shows.
+    The reference arms do not depend on the model, so any record of a trial gives them.
     """
-    folder = results_dir(results, study)
-    found = {name: [r for r in read(folder / f"{name}.jsonl") if r.trial <= study.trials]
-             for name, _, _ in conditions(study)}
-    bench = [r for r in read(results / benchmark / study.chooser / f"{study.domain}.{heuristic}.jsonl")
+    folder = results_dir(results, chooser, study)
+
+    def runs(name: str) -> list[Record]:
+        return [r for r in read(folder / f"{name}.jsonl") if r.trial <= study.trials]
+
+    bench = [r for r in read(results / benchmark / chooser / f"{study.domain}.{heuristic}.jsonl")
              if r.trial <= study.trials]
-    # The reference arms do not depend on the model, so any record of a trial gives them.
+    first = study.representations[0]
+    if kind == "representation-sensitivity":
+        rows = [Line(r + (" (the benchmark)" if r == first else ""),
+                     [x.score for x in runs(f"representation-{r}")])
+                for r in study.representations]
+    elif kind == "order-sensitivity":
+        rows = [Line(ORDER_TITLES.get(o, o), [x.score for x in runs(
+                    f"representation-{first}" if o == "random" else f"order-{o}")])
+                for o in study.orders]
+    else:
+        rows = [Line("run 1 (the benchmark run)", [r.score for r in bench]),
+                Line("run 2", [x.score for x in runs(f"representation-{first}")])]
+        rows += [Line(f"run {k}", [x.score for x in runs(f"repeat-{k}")])
+                 for k in range(3, study.repeats + 1)]
     references: dict = {}
-    for records in [bench, *found.values()]:
-        for r in records:
+    for name, _, _ in conditions(study):
+        for r in [*bench, *runs(name)]:
             references.setdefault(r.trial, r)
-    groups = []
-    representation_rows = [
-        Line("representation", f"{r}" + (" (the benchmark)" if r == study.representations[0]
-                                          else ""),
-             [x.score for x in found[f"representation-{r}"]])
-        for r in study.representations]
-    if bench:
-        representation_rows.append(Line("representation", f"{study.representations[0]}, the "
-                                        "benchmark run", [r.score for r in bench]))
-    order_rows = [Line("order", ORDER_TITLES.get(o, o),
-                       [x.score for x in found[f"order-{o}" if o != "random" else
-                                               f"representation-{study.representations[0]}"]])
-                  for o in study.orders]
     trials = sorted(references)
-    refs = [Line("reference", "Heuristic", [references[t].baseline_score for t in trials],
-                 reference=True),
-            Line("reference", "Random choice", [references[t].random_score for t in trials
-                                                if references[t].random_score is not None],
+    refs = [Line("Heuristic", [references[t].baseline_score for t in trials], reference=True),
+            Line("Random choice", [references[t].random_score for t in trials
+                                   if references[t].random_score is not None],
                  reference=True, marker="o")]
-    for title, rows in (("Representation (random option order)", representation_rows),
-                        (f"Option order ({study.representations[0]})", order_rows)):
-        rows = [row for row in rows if row.scores]
-        if rows:
-            groups.append((title, sorted(rows, key=lambda row: -geometric_mean(row.scores))
-                           + [ref for ref in refs if ref.scores]))
-    return groups
+    rows = [row for row in rows if row.scores]
+    if kind != "repeatability":
+        rows.sort(key=lambda row: -geometric_mean(row.scores))
+    return rows + [ref for ref in refs if ref.scores] if rows else []
 
 
 def summary(line: Line, seed: Collection) -> tuple[float, float, float]:

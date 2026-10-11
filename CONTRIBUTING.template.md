@@ -116,7 +116,7 @@ A new version adds a table to `benchmarks.toml`. Do not change or remove an exis
 1. Add the table for the new version to `benchmarks.toml`.
 2. Run `uv run python -m beelinebench publish <version>`. This command writes the page, and writes the index `docs/benchmarks/README.md` again.
 3. On the new page, describe what the version changes.
-4. When the version has results, write its commentary in `docs/benchmarks/<version>-commentary.md`: the main findings, by hand. `readme` puts it in the README and on the page of the version.
+4. When the version has results, write its commentary in `docs/benchmarks/<version>-commentary.template.md`: the main findings, by hand. `readme` makes the page `docs/benchmarks/<version>-commentary.md` from it, and links it from the README and the page of the version.
 5. Add the change to `CHANGELOG.md`.
 
 Use the version number for the type of change:
@@ -162,5 +162,3 @@ uv run python -m beelinebench readme --check
 ```
 
 The tests need no API key and no network. CI runs these commands on each push and pull request. If `README.md` is different from the output of the template, `readme --check` fails. It also fails if the figure does not show the current results. CI does not run the benchmarks.
-
-[Back to the README](README.md)

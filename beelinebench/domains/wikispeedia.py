@@ -25,6 +25,8 @@ from ..rng import Draws
 from ..search import Problem, check_heuristic
 
 SOURCE = "https://snap.stanford.edu/data/wikispeedia/wikispeedia_paths-and-graph.tar.gz"
+#: The SHA-256 of the file at SOURCE. `download` stops if the file has changed.
+SHA256 = "97697096f5d2dcb77aa69e3992305c6c561de89edb9fb10b5ad9feaf8ba534d5"
 DATA = Path("data") / "wikispeedia" / "wikispeedia_paths-and-graph"
 
 #: The category distance of an article that has no category.

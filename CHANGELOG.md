@@ -37,3 +37,13 @@ table is changed.
   median and 95th-percentile time of a request.
 * `python -m beelinebench.serve` puts a Python model function on the Jev protocol at
   a local port. `beelinebench.toml` has choosers for Cloudflare's Clef and Clef-flash.
+* BeelineBench installs as a package. `beelinebench init` writes a config to start from.
+  The working folder is the clone, `BEELINEBENCH_HOME`, or the current folder, so a clone
+  works as before. The wheel holds the official benchmarks and the starter config.
+* A run fetches the data of a domain when it needs it, and each fetch checks the SHA-256
+  of the data. `download --domain` fetches the data of some domains.
+* `beelinebench.api.evaluate` runs the benchmark on a model that is a Python function.
+* `report --json` prints the scores as JSON.
+* A key can come from `.env`, the environment, the file of `<NAME>_FILE`, or
+  `/run/secrets/<NAME>`. The `Dockerfile` and `compose.yaml` run BeelineBench in a
+  container.

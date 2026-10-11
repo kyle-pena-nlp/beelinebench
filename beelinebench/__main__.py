@@ -41,23 +41,25 @@ from rich.progress import (BarColumn, MofNCompleteColumn, Progress, TaskID, Text
                            TimeElapsedColumn)
 from rich.table import Table
 
-from . import benchmark, config, publishing, readme
+from . import benchmark, config, paths, publishing, readme
 from .benchmark import Benchmark
 from .domains import blocksworld, countdown, keys_doors, rush_hour, tiles, wikispeedia, word_ladder
 from .rng import Draws
-from .run import (Record, Tally, append, baseline, best, geometric_mean, measure, read,
-                  replace, results_file, shortest, summarise, takes_place, tally_trace,
+from .run import (Record, Tally, append, baseline, best, from_start, geometric_mean, measure,
+                  read, replay, replace, results_file, shortest, summarise, takes_place,
                   trace_file, troubles, wander)
-from .search import BudgetExhausted, ChooserError, Problem, Spend, Wallet, efficiency
+from .search import (BudgetExhausted, ChooserError, Problem, Spend, Wallet, best_first,
+                     efficiency)
 
-PROJECT = Path(__file__).resolve().parent.parent
+#: The working folder. See :mod:`beelinebench.paths`.
+PROJECT = paths.home()
 RESULTS = PROJECT / "results"
 #: The steps of each trial of a model arm: traces/<benchmark>/<chooser>/<file>/<trial>.jsonl.gz.
 #: Git ignores them.
 TRACES = PROJECT / "traces"
 #: The total cost of each model over all runs: .spend/<chooser>.json.
 SPEND = PROJECT / ".spend"
-OFFICIAL = PROJECT / "benchmarks.toml"
+OFFICIAL = paths.official(PROJECT)
 DOCS = PROJECT / "docs" / "benchmarks"
 
 console = Console()
@@ -65,6 +67,7 @@ console = Console()
 
 def maker(domain: str, settings: dict[str, Any]) -> Callable[[int], Problem]:
     """The function that makes trial ``n`` of ``domain`` with ``settings``."""
+    ensure_data(domain)
     if domain == "wikispeedia":
         graph = wikispeedia.load(PROJECT / wikispeedia.DATA)
         return lambda trial: wikispeedia.problem(trial, graph, **settings)
@@ -386,11 +389,19 @@ def report(args: argparse.Namespace) -> None:
                   "are the requests that the model refused, then asked again. "
                   "* a model run did not solve within the limit, so the true score is lower. "
                   "† a heuristic run did not, so the true heuristic score is lower.")
+    rows = []
     for path in sorted(RESULTS.glob("*/*/*.jsonl")):
         label, chooser = path.parent.parent.name, path.parent.name
         domain, heuristic = path.stem.split(".")
         records = read(path)
         s = summarise(records, draws=Draws("bootstrap", label, chooser, path.stem))
+        if args.json:
+            import dataclasses
+            rows.append({"benchmark": label, "chooser": chooser, "domain": domain,
+                         "heuristic": heuristic, "trials": len(records),
+                         "official_trials": officials[label].trials if label in officials
+                         else None, **dataclasses.asdict(s)})
+            continue
         of = f" of {officials[label].trials}" if label in officials else ""
         table.add_row(
             label, chooser, domain, heuristic, f"{len(records)}{of}",
@@ -408,6 +419,10 @@ def report(args: argparse.Namespace) -> None:
             else f"{s.latency_ms_median:,.0f} / {s.latency_ms_p95:,.0f}",
             ", ".join(s.served_models) or "—",
             "—" if s.first_utc is None else f"{s.first_utc[:10]} to {s.last_utc[:10]}")
+    if args.json:
+        import json
+        print(json.dumps(rows, indent=2))
+        return
     console.print(table)
 
 
@@ -426,6 +441,11 @@ def make_plot(args: argparse.Namespace) -> None:
         plot.draw_frontier(officials[name], RESULTS, frontier_png, labels,
                            config.unpublished(choosers), price_list(choosers))
         console.print(f"wrote {frontier_png}")
+        # The oracle regret is not in the README or the pages. Only this command draws it.
+        regret_png = target.with_name(target.stem + "-regret.png")
+        plot.draw_regret(officials[name], RESULTS, regret_png, labels,
+                         config.unpublished(choosers))
+        console.print(f"wrote {regret_png}")
     except ImportError:
         raise SystemExit("plot needs matplotlib. Run `uv sync --extra plot`.")
     except ValueError as error:
@@ -436,9 +456,9 @@ def make_plot(args: argparse.Namespace) -> None:
 def fill(args: argparse.Namespace) -> None:
     """Add the random arm, and the choices of each arm, to records without them.
 
-    It sends no requests. The heuristic and random arms run again here. The choices of
-    the model arm come from the trace file of the trial, so a trial without a trace
-    gets no ``model`` choices. Do not fill the files of a chooser while it runs: the
+    It sends no requests. The heuristic and random arms run again here. The model arm runs
+    again from the trace file of the trial, so a trial without a trace gets no ``model``
+    choices. Do not fill the files of a chooser while it runs: the
     run appends to them.
     """
     import dataclasses
@@ -451,12 +471,17 @@ def fill(args: argparse.Namespace) -> None:
     makers: dict = {}
     references: dict = {}  # (label, domain, trial): the choices of the heuristic and random arms
 
+    def prepared(label, domain, make, trial):
+        """The problem, its distances to the goal and from the start, and the shortest path."""
+        problem = make(trial)
+        distance = shortest(problem)
+        return problem, distance, from_start(problem), distance[problem.start]
+
     def reference_choices(label, domain, rules, make, trial) -> dict:
         key = (label, domain, trial)
         if key not in references:
-            problem = make(trial)
-            distance = shortest(problem)
-            tallies = {"heuristic": Tally(distance), "random": Tally(distance)}
+            problem, distance, start, d = prepared(label, domain, make, trial)
+            tallies = {"heuristic": Tally(distance, start, d), "random": Tally(distance, start, d)}
             baseline(problem, rules, step=tallies["heuristic"])
             wander(problem, rules, tallies["random"])
             references[key] = {arm: t.result() for arm, t in tallies.items()}
@@ -474,10 +499,14 @@ def fill(args: argparse.Namespace) -> None:
         traces = TRACES / label / chooser / path.stem
 
         def lacks_model(r: Record) -> bool:
-            return ((r.choices is None or "model" not in r.choices)
+            return ((r.choices is None or "contested" not in r.choices.get("model", {}))
                     and (traces / f"{r.trial}.jsonl.gz").exists())
 
-        missing = [r for r in records if r.random_score is None or r.choices is None
+        def lacks_references(r: Record) -> bool:
+            return r.choices is None or any("contested" not in r.choices.get(arm, {})
+                                            for arm in ("heuristic", "random"))
+
+        missing = [r for r in records if r.random_score is None or lacks_references(r)
                    or lacks_model(r)]
         if not missing:
             continue
@@ -491,14 +520,20 @@ def fill(args: argparse.Namespace) -> None:
                 aimless = wander(problem, rules)
                 r = dataclasses.replace(r, random_expansions=aimless.expansions,
                                         random_score=efficiency(d, aimless.expansions))
-            if r.choices is None or lacks_model(r):
-                choices = dict(r.choices or reference_choices(label, domain, rules, make,
-                                                              r.trial))
+            if lacks_references(r) or lacks_model(r):
+                choices = {**(r.choices or {}),
+                           **reference_choices(label, domain, rules, make, r.trial)}
                 trace = traces / f"{r.trial}.jsonl.gz"
-                if trace.exists():
+                if lacks_model(r):
                     with gzip.open(trace, "rt", encoding="utf-8") as lines:
                         steps = [json.loads(line) for line in lines][1:]  # after the header
-                    choices["model"] = tally_trace(steps)
+                    problem, distance, start, d = prepared(label, domain, make, r.trial)
+                    tally = Tally(distance, start, d)
+                    if replay(problem, rules, steps, r.model, tally):
+                        choices["model"] = tally.result()
+                    else:
+                        console.print(f"[yellow]{path.relative_to(PROJECT)} trial {r.trial}: "
+                                      "the trace does not fit the problem")
                 r = dataclasses.replace(r, choices=choices)
             filled.append(r)
         temporary = path.with_suffix(".jsonl.filling")
@@ -508,7 +543,7 @@ def fill(args: argparse.Namespace) -> None:
 
 
 def run_case_study(args: argparse.Namespace) -> None:
-    """Run each condition of the case study of the config. Spends money."""
+    """Run each condition of the sensitivity studies of the config. Spends money."""
     import dataclasses
     import importlib
 
@@ -518,41 +553,111 @@ def run_case_study(args: argparse.Namespace) -> None:
     cfg = config.load(args.config, officials)
     study = cfg.case_study
     if study is None:
-        raise SystemExit(f"{args.config} has no [case_study] table")
+        raise SystemExit(f"{args.config} has no [sensitivity] table")
     rules = officials[cfg.run.benchmark]
-    chooser = cfg.choosers[study.chooser]
     represent = getattr(importlib.import_module(f".domains.{study.domain}", __package__),
                         "represent", None)
     if represent is None:
         raise SystemExit(f"{study.domain} has no other representations")
-    ledger = dataclasses.replace(chooser, name=f"{chooser.name}.{case_study.LABEL}")
-    max_cost = chooser.max_cost or cfg.run.max_cost
-    spend = Spend(max_requests=chooser.max_requests, max_input_tokens=chooser.max_input_tokens,
-                  wallet=wallet_of(ledger, max_cost, cfg.run.max_total_cost))
-    make_chooser = config.factory(chooser, PROJECT / ".env")
     make = maker(study.domain, rules.domains[study.domain])
-    folder = case_study.results_dir(RESULTS, study)
-    for name, representation, order in case_study.conditions(study):
-        path = folder / f"{name}.jsonl"
-        done = {r.trial for r in read(path)}
-        for trial in range(1, study.trials + 1):
-            if trial in done:
+    for name in study.choosers:
+        chooser = cfg.choosers[name]
+        ledger = dataclasses.replace(chooser, name=f"{chooser.name}.{case_study.LABEL}")
+        spend = Spend(max_requests=chooser.max_requests,
+                      max_input_tokens=chooser.max_input_tokens,
+                      wallet=wallet_of(ledger, chooser.max_cost or cfg.run.max_cost,
+                                       cfg.run.max_total_cost))
+        make_chooser = config.factory(chooser, PROJECT / ".env")
+        folder = case_study.results_dir(RESULTS, chooser.name, study)
+        for condition, representation, order in case_study.conditions(study):
+            path = folder / f"{condition}.jsonl"
+            done = {r.trial for r in read(path)}
+            for trial in range(1, study.trials + 1):
+                if trial in done:
+                    continue
+                shown, arrange = case_study.prepared(make(trial), representation, order,
+                                                     chooser.model, represent)
+                choose = make_chooser(shown, spend, arrange)
+                trace = (TRACES / case_study.LABEL / chooser.name / study.domain / condition
+                         / f"{trial}.jsonl.gz")
+                try:
+                    record = measure(shown, rules=rules, label=case_study.LABEL, choose=choose,
+                                     chooser=chooser.name, model=chooser.model, spend=spend,
+                                     trace=trace)
+                except (BudgetExhausted, ChooserError) as error:
+                    raise SystemExit(f"{name} {condition} trial {trial} is not recorded: {error}")
+                append(path, record)
+                console.print(f"{name} {condition} trial {trial}: score {record.score:.3f} · "
+                              f"heuristic {record.baseline_score:.3f} · {record.requests} requests")
+        console.print(f"{name}: the studies are complete: {folder.relative_to(PROJECT)}")
+
+
+def agreement(args: argparse.Namespace) -> None:
+    """Send the questions of the traces of ``--against`` to ``--chooser``, and compare.
+
+    For each traced trial, the search follows the choices of the trace, so each question
+    has the same options in the same order as in that run. At each question, the chooser
+    under test answers too. The table gives the share of questions where both chose the
+    same option, and the mean difference of the probabilities that the two gave that
+    option. It sends a request for each question, and records nothing.
+    """
+    import gzip
+    import json
+
+    officials = benchmark.load(OFFICIAL)
+    cfg = config.load(args.config, officials)
+    rules = officials[args.benchmark or cfg.run.benchmark]
+    test, against = cfg.choosers[args.chooser], cfg.choosers[args.against]
+    make_chooser = config.factory(test, PROJECT / ".env")
+    import time
+
+    table = Table("domain", "trials", "questions", "same choice", "mean |difference| of p",
+                  "questions a second",
+                  title=f"{test.title} against the traces of {against.title}")
+    for domain in args.domain or list(rules.domains):
+        make = maker(domain, rules.domains[domain])
+        stem = f"{domain}.{rules.domains[domain]['heuristic']}"
+        trials = same = questions = 0
+        differences: list[float] = []
+        started = time.monotonic()
+        for trial in range(1, args.trials + 1):
+            trace = TRACES / rules.name / against.name / stem / f"{trial}.jsonl.gz"
+            if not trace.exists():
                 continue
-            shown, arrange = case_study.prepared(make(trial), representation, order,
-                                                 chooser.model, represent)
-            choose = make_chooser(shown, spend, arrange)
-            trace = (TRACES / case_study.LABEL / chooser.name / study.domain / name
-                     / f"{trial}.jsonl.gz")
-            try:
-                record = measure(shown, rules=rules, label=case_study.LABEL, choose=choose,
-                                 chooser=chooser.name, model=chooser.model, spend=spend,
-                                 trace=trace)
-            except (BudgetExhausted, ChooserError) as error:
-                raise SystemExit(f"{name} trial {trial} is not recorded: {error}")
-            append(path, record)
-            console.print(f"{name} trial {trial}: score {record.score:.3f} · heuristic "
-                          f"{record.baseline_score:.3f} · {record.requests} requests")
-    console.print(f"the case study is complete: {folder.relative_to(PROJECT)}")
+            with gzip.open(trace, "rt", encoding="utf-8") as lines:
+                steps = [json.loads(line) for line in lines][1:]
+            problem = make(trial)
+            spend = Spend(max_requests=10 ** 9, max_input_tokens=10 ** 12)
+            # The order draws of the traced run, so each question is the same request.
+            ask = make_chooser(problem, spend, Draws(domain, trial, "order", against.model))
+            traced = iter(steps)
+
+            def choose(states):
+                nonlocal same, questions
+                step = next(traced)
+                names = [problem.render(s) for s in states]
+                chosen = names.index(step["chosen"])
+                mine = ask(states)
+                questions += 1
+                same += mine == chosen
+                if spend.probabilities is not None and step.get("p_chosen") is not None:
+                    differences.append(abs(spend.probabilities[chosen] - step["p_chosen"]))
+                return chosen
+
+            def forced(states, index, state, was_forced):
+                if was_forced:
+                    next(traced)
+
+            best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
+                       choose=choose, max_expansions=len(steps),
+                       max_frontier=rules.max_frontier,
+                       evict=Draws(domain, trial, "evict", "model", against.model), step=forced)
+            trials += 1
+        if questions:
+            table.add_row(domain, str(trials), f"{questions:,}", f"{same / questions:.1%}",
+                          f"{sum(differences) / len(differences):.3f}" if differences else "—",
+                          f"{questions / (time.monotonic() - started):.1f}")
+    console.print(table)
 
 
 def check_docs(args: argparse.Namespace) -> None:
@@ -631,7 +736,9 @@ def make_readme(args: argparse.Namespace) -> None:
             section = readme.results_section(b, RESULTS, labels, hidden, prices)
             notes = readme.commentary(name, officials, RESULTS, choosers, cfg.mini)
             if notes:
-                section = f"## Commentary\n\n{notes}\n\n{section}"
+                section = (f"## Commentary\n\n[Commentary on benchmark {name}]"
+                           f"({name}-commentary.md)\n\n{section}")
+                pages[DOCS / f"{name}-commentary.md"] = readme.commentary_page(name, notes)
             pages[page] = publishing.with_results(page.read_text(), section)
     # The mini benchmark: its figures and its index, in docs/benchmarks/mini/.
     minis, mini_path, mini_text = [], DOCS / publishing.MINI / publishing.INDEX, None
@@ -648,29 +755,29 @@ def make_readme(args: argparse.Namespace) -> None:
             if plot.choice_rows(b, RESULTS, labels, hidden, **scope):
                 minis.append(("choices", b, mini_path.parent / f"{name}-choices.png", scope))
 
-    # The case study figure.
-    study_png, study_args = None, None
+    # The figure of each sensitivity study.
+    studies = []
     if cfg.case_study is not None:
         from . import case_study as study_module
         latest = officials[list(officials)[-1]]
-        if any(study_module.results_dir(RESULTS, cfg.case_study).glob("*.jsonl")):
-            study_png = PROJECT / readme.CASE_STUDY_FIGURE.format(latest.name)
-            study_args = (cfg.case_study, RESULTS, latest, labels.get(cfg.case_study.chooser,
-                                                                      cfg.case_study.chooser))
+        if any(any(study_module.results_dir(RESULTS, c, cfg.case_study).glob("*.jsonl"))
+               for c in cfg.case_study.choosers):
+            studies = [(kind, PROJECT / readme.STUDY_FIGURE.format(latest.name, kind))
+                       for kind in study_module.STUDIES]
 
-    def study_is_current() -> bool:
-        return study_png is None or plot.stored_fingerprint(study_png) == \
-            plot.case_study_fingerprint(*study_args)
+    def study_is_current(kind, png) -> bool:
+        return plot.stored_fingerprint(png) == plot.case_study_fingerprint(
+            cfg.case_study, RESULTS, latest, kind, labels)
 
     def mini_is_current(kind, b, png, scope) -> bool:
         return plot.is_current(png, b, RESULTS, labels, hidden,
                                prices if kind == "frontier" else {}, kind, **scope)
 
     if not args.check:
-        if not study_is_current():
-            plot.draw_case_study(study_args[0], study_args[1], study_png, study_args[2],
-                                 study_args[3])
-            console.print(f"wrote {study_png.relative_to(PROJECT)}")
+        for kind, png in studies:
+            if not study_is_current(kind, png):
+                plot.draw_case_study(cfg.case_study, RESULTS, png, latest, kind, labels)
+                console.print(f"wrote {png.relative_to(PROJECT)}")
         for kind, b, png, scope in minis:
             if mini_is_current(kind, b, png, scope):
                 continue
@@ -699,7 +806,7 @@ def make_readme(args: argparse.Namespace) -> None:
             index_path.write_text(index_text)
             console.print(f"wrote {index_path.relative_to(PROJECT)}")
         for page, page_text in pages.items():
-            if page.read_text() != page_text:
+            if not page.exists() or page.read_text() != page_text:
                 page.write_text(page_text)
                 console.print(f"wrote {page.relative_to(PROJECT)}")
         for target, text in built.items():
@@ -715,11 +822,11 @@ def make_readme(args: argparse.Namespace) -> None:
         raise SystemExit(f"{', '.join(old)} does not show the current results. "
                          "Run `python -m beelinebench readme`, and commit the figure.")
     stale = [str(page.relative_to(PROJECT)) for page, page_text in pages.items()
-             if page.read_text() != page_text]
+             if not page.exists() or page.read_text() != page_text]
     stale += [str(png.relative_to(PROJECT)) for kind, b, png, scope in minis
               if not mini_is_current(kind, b, png, scope)]
-    if not study_is_current():
-        stale.append(str(study_png.relative_to(PROJECT)))
+    stale += [str(png.relative_to(PROJECT)) for kind, png in studies
+              if not study_is_current(kind, png)]
     if mini_text is not None and (not mini_path.exists() or mini_path.read_text() != mini_text):
         stale.append(str(mini_path.relative_to(PROJECT)))
     if stale:
@@ -741,32 +848,74 @@ def make_readme(args: argparse.Namespace) -> None:
     console.print("the README and the pages are up to date")
 
 
-def download(args: argparse.Namespace) -> None:
+#: For each domain with downloaded data: the file that shows the data is there, its source,
+#: and the SHA-256 of the source.
+DATA = {
+    "word_ladder": (word_ladder.DATA, word_ladder.SOURCE, word_ladder.SHA256),
+    "wikispeedia": (wikispeedia.DATA / "links.tsv", wikispeedia.SOURCE, wikispeedia.SHA256),
+}
+
+
+def ensure_data(domain: str) -> None:
+    """Download the data of ``domain`` if it is not in data/ yet. Other domains need none.
+
+    The file must have its SHA-256, so that each machine has the same trials.
+    """
+    if domain not in DATA:
+        return
+    marker, url, sha256 = DATA[domain]
+    if (PROJECT / marker).exists():
+        return
+    import hashlib
+
     import httpx
 
-    def fetch(url: str) -> bytes:
-        console.print(f"fetching {url}")
-        response = httpx.get(url, follow_redirects=True, timeout=300.0)
-        response.raise_for_status()
-        return response.content
+    console.print(f"fetching the data of {domain} from {url}")
+    response = httpx.get(url, follow_redirects=True, timeout=300.0)
+    response.raise_for_status()
+    found = hashlib.sha256(response.content).hexdigest()
+    if found != sha256:
+        raise SystemExit(f"{url} has the SHA-256 {found}, not {sha256}. The source changed, "
+                         "so its trials would not be those of the benchmark.")
+    target = PROJECT / marker
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if url.endswith(".tar.gz"):
+        with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
+            archive.extractall(target.parent.parent, filter="data")
+    else:
+        target.write_bytes(response.content)
 
-    target = PROJECT / word_ladder.DATA
-    if not target.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(fetch(word_ladder.SOURCE))
-    target = PROJECT / wikispeedia.DATA
-    if not (target / "links.tsv").exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(fileobj=io.BytesIO(fetch(wikispeedia.SOURCE)), mode="r:gz") as archive:
-            archive.extractall(target.parent, filter="data")
+
+def download(args: argparse.Namespace) -> None:
+    for domain in args.domain or DATA:
+        ensure_data(domain)
     console.print(f"the data is in {PROJECT / 'data'}")
+
+
+def init(args: argparse.Namespace) -> None:
+    """Write a ``beelinebench.toml`` to start from, in the working folder."""
+    import shutil
+
+    target = args.config
+    if target.exists():
+        raise SystemExit(f"{target} exists. Edit it, or delete it to start again.")
+    shutil.copyfile(paths.starter_config(), target)
+    console.print(f"wrote {target}\n"
+                  "Next: put the keys of your models in .env, check the limits in the [run] table, "
+                  "and run `beelinebench run --mini` or `beelinebench baseline`.")
+
+
+#: The commands that need no beelinebench.toml.
+NO_CONFIG = {"init", "download", "report", "check-docs"}
+#: The commands that change the docs of the repository, so they need a clone of it.
+MAINTAINER = {"readme", "publish", "check-docs"}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="beelinebench")
     parser.add_argument("--config", type=Path, default=PROJECT / "beelinebench.toml",
                         help="what to run, and the choosers. The default is beelinebench.toml")
-    commands = parser.add_subparsers(required=True)
+    commands = parser.add_subparsers(required=True, dest="command")
 
     for name, handler, help_text in (
             ("run", run, "both arms, for each chooser. Spends money."),
@@ -802,6 +951,17 @@ def main() -> None:
                                   "chooser. Spends one or two requests.")
     command.set_defaults(handler=probe)
     command.add_argument("--chooser", required=True)
+    command = commands.add_parser("agreement", help="send the questions of the traces of one "
+                                  "chooser to another, and compare their choices. Sends "
+                                  "requests, and records nothing.")
+    command.set_defaults(handler=agreement)
+    command.add_argument("--chooser", required=True, help="the chooser to test, for example "
+                         "clef-local")
+    command.add_argument("--against", required=True, help="the chooser of the traces, for "
+                         "example clef")
+    command.add_argument("--benchmark", help="an official benchmark. The default is [run] benchmark")
+    command.add_argument("--domain", nargs="+", help="only these domains")
+    command.add_argument("--trials", type=int, default=5, help="trials 1 to N that have a trace")
     command = commands.add_parser("case-study", help="run the case study of the config: one "
                                   "model on one problem, with each representation and option "
                                   "order. Spends money.")
@@ -810,8 +970,11 @@ def main() -> None:
                                   "Sends nothing. Do not use it on a chooser that runs.")
     command.set_defaults(handler=fill)
     command.add_argument("--chooser", nargs="+", help="only these choosers")
-    commands.add_parser("report", help="the score of each result file"
-                        ).set_defaults(handler=report)
+    command = commands.add_parser("report", help="the score of each result file")
+    command.set_defaults(handler=report)
+    command.add_argument("--json", action="store_true",
+                         help="print the scores as JSON, one object for each result file, "
+                         "for a dashboard or a script")
     command = commands.add_parser("plot", help="the scores of an official benchmark as a "
                                   "figure. Needs `uv sync --extra plot`.")
     command.set_defaults(handler=make_plot)
@@ -829,10 +992,21 @@ def main() -> None:
                                   "official benchmark")
     command.set_defaults(handler=publish)
     command.add_argument("version", help="a benchmark of benchmarks.toml")
-    commands.add_parser("download", help="fetch the data of the domains that need it"
-                        ).set_defaults(handler=download)
+    commands.add_parser("init", help="write a beelinebench.toml to start from, in the working "
+                        "folder").set_defaults(handler=init)
+    command = commands.add_parser("download", help="fetch the data of the domains that need "
+                                  "it. A run also fetches it when it needs it.")
+    command.set_defaults(handler=download)
+    command.add_argument("--domain", nargs="+", choices=sorted(DATA),
+                         help="only these domains. The default is each domain that needs data")
 
     args = parser.parse_args()
+    command = args.command
+    if command in MAINTAINER and not (PROJECT / readme.TEMPLATE).exists():
+        raise SystemExit(f"{command} changes the docs of the repository, so it runs in a clone of "
+                         "https://github.com/kyle-pena-nlp/beelinebench.")
+    if command not in NO_CONFIG and not args.config.exists():
+        raise SystemExit(f"{args.config} does not exist. Run `beelinebench init` to write one.")
     args.handler(args)
 
 

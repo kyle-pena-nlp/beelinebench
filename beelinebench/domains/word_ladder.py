@@ -19,6 +19,8 @@ from ..rng import Draws
 from ..search import Problem, check_heuristic
 
 SOURCE = "https://www-cs-faculty.stanford.edu/~knuth/sgb-words.txt"
+#: The SHA-256 of the file at SOURCE. `download` stops if the file has changed.
+SHA256 = "52a04f4fb860953c2a29c2769014bd8b12d090a19e7577a460a2a2586bd6d4ce"
 DATA = Path("data") / "words" / "sgb-words.txt"
 
 CONTEXT = (

@@ -12,7 +12,7 @@ A hosted model name, for example an alias such as `jev-latest`, can point to a d
 
 The Decisions API can answer a question with the type `refusal` and no choice. OpenAI does not document the cause, and the API has no setting for it.
 
-In benchmark 1.0.0, the API refused 73,727 of 132,240 requests (56%). The refusals are not equal in the domains:
+In benchmark 1.0.0, the API refused 147,719 of 221,231 requests (67%). The refusals are not equal in the domains:
 
 | domain | refused requests | decisions that used the fallback |
 |---|---|---|
@@ -21,7 +21,8 @@ In benchmark 1.0.0, the API refused 73,727 of 132,240 requests (56%). The refusa
 | Countdown | 0.6% | 0.1% |
 | Word ladder | 14.2% | 3.7% |
 | Wikispeedia | 54.9% | 34.1% |
-| Rush Hour (50 of 100 trials) | 86.4% | 74.8% |
+| Rush Hour | 85.7% | 73.6% |
+| Keys and doors | 0.0% | 0.0% |
 
 In Rush Hour, most decisions use the fallback. Thus, the Rush Hour score of GPT-6 Luna measures the fallback more than the model.
 
@@ -38,6 +39,10 @@ When the API refuses a question, the chooser asks once more, with the options in
 ## OpenRouter answers with a dated model name
 
 OpenRouter takes a model name such as `liquid/d1`, and it answers with a dated name such as `liquid/d1-20260930`. The `served` setting of a chooser gives the dated name that each answer must give. Thus, the run uses one version of the model. If OpenRouter changes the version, the run stops.
+
+## A short context
+
+Kev 4B has one provider on OpenRouter, SiliconFlow, and its context is 8,192 tokens. A question of Blocksworld or keys and doors can be longer: a question with 255 options needs about 11,000 to 13,000 tokens. In a test, the API rejected a Blocksworld question with 122 options. Thus, a full run of Kev 4B is not possible on OpenRouter, and the results leave it out.
 
 ## Models that BeelineBench cannot use
 
@@ -64,5 +69,3 @@ BeelineBench does not record the trial that was in progress when the run stopped
 ## The Claude reference
 
 The `haiku` chooser uses the default temperature of the Anthropic API, and that API has no seed. Thus, identical requests can give different answers. The model can also reason before it answers, and the choice models cannot. Thus, its score does not measure the same ability, and the README does not show it.
-
-[Back to the README](../README.md)

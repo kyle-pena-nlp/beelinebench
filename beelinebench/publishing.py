@@ -61,8 +61,9 @@ def index(officials: dict[str, Benchmark]) -> str:
         f"### Benchmark {name}\n\n![The scores of each model and heuristic in benchmark "
         f"{name}, by domain, with 95% intervals]({name}.png)" for name in newest)
     choices = "\n\n".join(
-        f"### Benchmark {name}\n\n![The share of decisions that matched the oracle for each model "
-        f"and heuristic in benchmark {name}, by domain, with 95% intervals]({name}-choices.png)"
+        f"### Benchmark {name}\n\n![The share of decisions that took a state on a shortest path, "
+        f"for each model and heuristic in benchmark {name}, by domain, with 95% intervals]"
+        f"({name}-choices.png)"
         for name in newest)
     frontiers = "\n\n".join(
         f"### Benchmark {name}\n\n![The score against the cost of a step for each model in "
@@ -86,7 +87,7 @@ file is out of date.
 
 {frontiers}
 
-## Choices against the oracle
+## Optimal choices
 
 {choices}
 """
@@ -112,6 +113,9 @@ The mini benchmark of a version is its first {trials} trials of each domain, wit
 `uv run python -m beelinebench run --mini` runs it. Trial n is the same trial as in the
 full benchmark, so a mini score is the full score of fewer trials, with wider intervals.
 [The benchmarks](../{INDEX}) has the full results.
+
+The `[mini]` table of `beelinebench.toml` sets the trials and the models of the mini
+benchmark. This index shows the models of that table.
 
 {parts}
 """
