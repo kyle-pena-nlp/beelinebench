@@ -1,0 +1,13 @@
+# Keys, ledgers and local runs stay out of the image.
+.env
+.spend/
+traces/
+archive/
+data/
+.venv/
+.git/
+__pycache__/
+.pytest_cache/
+*.candidate
+secrets/
+dist/

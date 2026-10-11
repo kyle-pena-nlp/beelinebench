@@ -1,0 +1,28 @@
+BeelineBench
+Copyright 2026 Kyle Pena
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party data
+----------------
+
+BeelineBench does not include the data below in its source. The `download` command, or
+the first run that needs the data, fetches it from its source and checks its SHA-256.
+
+Word list (the word ladder domain)
+  The five-letter words of The Stanford GraphBase, by Donald E. Knuth:
+  https://www-cs-faculty.stanford.edu/~knuth/sgb-words.txt
+  Knuth states that the programs and data of The Stanford GraphBase are in the public
+  domain: https://www-cs-faculty.stanford.edu/~knuth/sgb.html
+  The Docker image includes this file.
+
+Wikispeedia (the wikispeedia domain)
+  The Wikispeedia paths and graph, from the Stanford Network Analysis Project (SNAP):
+  https://snap.stanford.edu/data/wikispeedia.html
+  SNAP gives no license for this dataset, and the Docker image does not include it.
+  The dataset asks for these citations in a publication that uses it:
+    Robert West and Jure Leskovec. Human Wayfinding in Information Networks.
+      21st International World Wide Web Conference (WWW), 2012.
+    Robert West, Joelle Pineau, and Doina Precup. Wikispeedia: An Online Game for
+      Inferring Semantic Distances between Concepts. 21st International Joint Conference
+      on Artificial Intelligence (IJCAI), 2009.

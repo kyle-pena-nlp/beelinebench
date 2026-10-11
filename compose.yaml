@@ -1,0 +1,30 @@
+# BeelineBench with Docker Compose. The keys are Compose secrets: files on the host that the
+# container sees in /run/secrets/, not in its environment, so `docker inspect` does not
+# show them. Put each key in its own file in ./secrets/, for example:
+#
+#   mkdir -p secrets && printf '%s' "$PERPLEXITY_API_KEY" > secrets/PERPLEXITY_API_KEY
+#   docker compose run --rm beelinebench run --mini
+#
+# Git and Docker ignore ./secrets/. See docs/lab-integration.md.
+services:
+  beelinebench:
+    build: .
+    image: beelinebench
+    command: ["run", "--mini"]
+    secrets:
+      - PERPLEXITY_API_KEY
+    volumes:
+      # The results, traces and ledgers stay on the host after the container stops.
+      - ./results:/app/results
+      - ./traces:/app/traces
+      - ./.spend:/app/.spend
+      - ./beelinebench.toml:/app/beelinebench.toml:ro
+      # The Wikispeedia data, fetched from SNAP on first use and kept between runs.
+      - wikispeedia:/app/data/wikispeedia
+
+volumes:
+  wikispeedia:
+
+secrets:
+  PERPLEXITY_API_KEY:
+    file: ./secrets/PERPLEXITY_API_KEY
