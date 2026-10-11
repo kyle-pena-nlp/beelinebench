@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from .benchmark import Benchmark
 from .rng import Draws
 from .case_study import STUDIES
-from .run import read, summarise
+from .run import geometric_mean, read, summarise
 
 if TYPE_CHECKING:
     from .config import ChooserConfig
@@ -35,7 +35,7 @@ OUTPUT = "README.md"
 #: and image paths of the placeholders are from the project root, so a page in ``docs/``
 #: uses no figure placeholder.
 PAGES = ((TEMPLATE, OUTPUT), ("docs/model-quirks.template.md", "docs/model-quirks.md"),
-         ("docs/costs.template.md", "docs/costs.md"),
+         ("docs/costs.template.md", "docs/costs.md"), ("docs/usage.template.md", "docs/usage.md"),
          *((f"docs/benchmarks/{kind}.template.md", f"docs/benchmarks/{{latest}}-{kind}.md")
            for kind in ("representation-sensitivity", "order-sensitivity", "repeatability")),
          ("CONTRIBUTING.template.md", "CONTRIBUTING.md"))
@@ -99,6 +99,72 @@ def results_table(b: Benchmark, results: Path, hidden: Collection[str] = ()) -> 
             "| oracle score | path score | solved | refusals | served by | first run (UTC) |\n"
             "|---|---|---|---|---|---|---|---|---|---|---|---|---|\n" + "\n".join(rows)
             + "".join("\n\n" + note for note in notes))
+
+
+def leaderboard(b: Benchmark, results: Path, labels: Mapping[str, str] = {},
+                hidden: Collection[str] = ()) -> str:
+    """A compact table of ``b``: one row for each model, with its score on each domain.
+
+    The overall score is the geometric mean of the domain scores, so a domain where all
+    scores are low counts as much as a domain where all scores are high. Only a model with
+    results on every domain gets one. The best model score of each column is bold, as
+    rounded. The heuristic and random choice follow the models, in italics.
+    """
+    from .plot import rows, score_text
+
+    groups = rows(b, results, labels, hidden)
+    if not groups:
+        return f"No results for benchmark {b.name} yet."
+    titles = [title for title, _ in groups]
+    table: dict[str, dict[str, object]] = {}
+    for title, group in groups:
+        for row in group:
+            name = ("Heuristic" if row.marker == "D" else "Random choice") if row.reference \
+                else row.label
+            table.setdefault(name, {})[title] = row
+    references = [name for name in ("Heuristic", "Random choice") if name in table]
+    models = [name for name in table if name not in references]
+
+    def overall(name: str) -> float | None:
+        cells = table[name]
+        return (geometric_mean([cells[t].score for t in titles])
+                if all(t in cells for t in titles) else None)
+
+    def beats(name: str) -> str:
+        wins = sum(1 for t in titles if t in table[name] and "Heuristic" in table
+                   and t in table["Heuristic"] and table[name][t].score > table["Heuristic"][t].score)
+        return f"{wins} of {len(titles)}"
+
+    # The best text, so that models that round to the same score are all bold.
+    best = {t: score_text(max((table[m][t].score for m in models if t in table[m]), default=0))
+            for t in titles}
+    best["overall"] = score_text(max((s for m in models if (s := overall(m)) is not None),
+                                     default=0))
+
+    def cell(text: str, bold: bool, italic: bool) -> str:
+        return f"**{text}**" if bold else f"*{text}*" if italic else text
+
+    def line(name: str, italic: bool) -> str:
+        cells = table[name]
+        total = overall(name)
+        marks = "".join(sorted({m for t in titles if t in cells for m in cells[t].marks}))
+        out = [cell(name, False, italic),
+               "—" if total is None else cell(score_text(total) + marks.replace("*", "\\*"),
+                                              not italic and score_text(total) == best["overall"],
+                                              italic)]
+        for t in titles:
+            row = cells.get(t)
+            out.append("—" if row is None else cell(
+                score_text(row.score) + row.marks.replace("*", "\\*"),
+                not italic and score_text(row.score) == best[t], italic))
+        out.append("" if italic else beats(name))
+        return "| " + " | ".join(out) + " |"
+
+    ranked = sorted(models, key=lambda m: -(overall(m) or 0))
+    header = ("| model | overall | " + " | ".join(titles) + " | beats the heuristic |\n"
+              "|---|---:|" + "---:|" * len(titles) + ":---:|")
+    return "\n".join([header, *(line(m, False) for m in ranked),
+                      *(line(r, True) for r in references)])
 
 
 def tokens_per_trial(path: Path) -> tuple[float, float, int] | None:
@@ -386,6 +452,9 @@ def placeholders(officials: dict[str, Benchmark], results: Path,
         "latest_benchmark_link": lambda argument: (
             f"[{official(argument).name}]({PAGE.format(official(argument).name)})"),
         "results": lambda argument: results_table(official(argument), results, hidden),
+        "leaderboard": lambda argument: leaderboard(
+            official(argument), results, {c.name: c.title for c in (choosers or {}).values()},
+            hidden),
         "results_figure": lambda argument: (
             f"![The scores of each model and heuristic in benchmark {official(argument).name}, "
             f"by domain, with 95% intervals]({FIGURE.format(official(argument).name)})"),

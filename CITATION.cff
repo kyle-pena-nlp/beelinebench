@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use BeelineBench, cite it as below, and give the benchmark version that you used."
+title: "BeelineBench: How Efficiently Do Decision Models Navigate Multi-Step Problems?"
+type: software
+authors:
+  - family-names: Pena
+    given-names: Kyle
+version: 1.0.0
+date-released: 2026-10-10
+license: Apache-2.0
+repository-code: "https://github.com/kyle-pena-nlp/beelinebench"
+url: "https://github.com/kyle-pena-nlp/beelinebench"
+keywords:
+  - benchmark
+  - decision models
+  - best-first search
+  - planning

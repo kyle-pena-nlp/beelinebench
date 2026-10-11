@@ -176,7 +176,7 @@ price_input = 0.24
 price_output = 0
 max_cost = 70.0                     # above [run] max_cost: the pilot goes to 20 trials
 max_requests = 200000
-max_input_tokens = 125000000        # $30
+max_input_tokens = 291000000        # $70
 
 [chooser.clef-flash]
 label = "Clef-flash"
@@ -188,8 +188,9 @@ endpoint = "clef-flash"
 api_key_env = "CLOUDFLARE_API_TOKEN"
 price_input = 0.09
 price_output = 0
+max_cost = 50.0                     # above [run] max_cost: the pilot goes to 20 trials
 max_requests = 200000
-max_input_tokens = 333000000        # $30
+max_input_tokens = 555000000        # $50
 
 # A general LLM, for reference. It can reason before it answers, and the choice models
 # cannot, so the README leaves it out. Its full run is also expensive.

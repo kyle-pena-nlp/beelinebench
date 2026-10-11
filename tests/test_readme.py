@@ -110,3 +110,13 @@ def test_a_price_estimate_uses_measured_tokens_or_borrows_them(tmp_path):
 def test_the_latest_benchmark_link_points_to_its_page(tmp_path):
     text = readme.render("{{ latest_benchmark_link }}", OFFICIALS, tmp_path)
     assert text.endswith("[1.0.0](docs/benchmarks/1.0.0.md)")
+
+
+def test_the_leaderboard_has_a_row_for_each_model_and_reference(tmp_path):
+    path = tmp_path / "1.0.0" / "fake" / "tiles.manhattan.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("".join(json.dumps(record(n, 0.8)) + "\n" for n in (1, 2)))
+    table = readme.leaderboard(OFFICIALS["1.0.0"], tmp_path, {"fake": "Fake 1"})
+    assert table.splitlines()[0] == "| model | overall | 8-puzzle | beats the heuristic |"
+    assert "| Fake 1 | **0.80** | **0.80** | 1 of 1 |" in table
+    assert "| *Heuristic* | *0.50* | *0.50* |  |" in table
