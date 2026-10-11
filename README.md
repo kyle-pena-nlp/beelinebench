@@ -8,7 +8,7 @@
 
 **How efficiently do decision models navigate multi-step problems?**
 
-[Results](#results) · [Method](#method) · [Domains](#domains) · [Quick start](#quick-start) · [Documentation](#documentation) · [Citation](#citation)
+[Results](#results) · [Method](#method) · [Domains](#domains) · [Quick start](#quick-start) · [Changelog](CHANGELOG.md) · [Citation](#citation)
 
 [![Benchmark 1.0.0](https://img.shields.io/badge/benchmark-1.0.0-1f2328)](docs/benchmarks/1.0.0.md)
 [![CI](https://github.com/kyle-pena-nlp/beelinebench/actions/workflows/ci.yml/badge.svg)](https://github.com/kyle-pena-nlp/beelinebench/actions/workflows/ci.yml)
@@ -19,11 +19,11 @@
 
 </div>
 
-BeelineBench measures how well a decision model plans while it solves a multi-step problem, like blockworld or the sliding tile puzzle. A decision model that chooses to explore fewer unnecessary intermediate states gets a higher score.  A perfect score means that the decision model 'beelined' directly to the solution along a shortest path.
+BeelineBench measures how well a decision model plans while it solves a multi-step problem, like Blocksworld or the sliding tile puzzle. A decision model that chooses to explore fewer unnecessary intermediate states is given a higher score. A perfect score means that the decision model 'beelined' directly to the solution along a shortest path.
 
 - **7 domains**: sliding puzzles, planning, arithmetic, word games, and link navigation on Wikipedia.
 - **Baselines**: the classic heuristic of each domain, random choice, and an oracle that knows a shortest path to the goal.
-- **Seeded and portable**: each trial, option order, and dropped state comes from seeded draws, so a trial is the same on each machine. A [master seed](docs/usage.md#master-seed) (`--seed N`) draws a new set of trials under the same rules, to check that a result does not depend on the official trials.
+- **Seeded and portable**: the problem trials are randomly generated. An optional [master seed](docs/usage.md#master-seed) (`--seed N`) deterministically generates a different set of trials for each problem domain. The seed will produce the same trial set across machines.
 - **Open harness**: configuration-driven, with a container image. Any model that uses the Jev protocol or OpenAI's Decisions API can run. [Integrate BeelineBench with your evaluation suite](docs/lab-integration.md).
 
 > [!NOTE]
@@ -44,7 +44,7 @@ BeelineBench measures how well a decision model plans while it solves a multi-st
 
 [Commentary on benchmark 1.0.0](docs/benchmarks/1.0.0-commentary.md).
 
-\* or †: at least one model (\*) or heuristic (†) run did not solve within 2,500 nodes, so the true score is lower.  The overall score is the geometric mean of the domain scores.
+\* or †: at least one model (\*) or heuristic (†) run did not solve within 2,500 nodes, so the true score is lower. The overall score is the geometric mean of the domain scores.
 
 ## Diagnostic Plots
 
@@ -75,7 +75,7 @@ BeelineBench measures how well a decision model plans while it solves a multi-st
 
 The decision model is used to rank the frontier of open states in a best-first search. At each step, the search sends all open states to the model in one request. The search stops when it finds the goal.
 
-Before the search, a breadth-first search finds a shortest path to the goal to find a shortest path. The score is the number of nodes in the shortest path to the solution divided by the number of nodes that the model explores.
+Before the search, a breadth-first search finds a shortest path to the goal. The score is the number of nodes in the shortest path to the solution divided by the number of nodes that the model explores.
 
 ```
 score = (shortest path + 1) / nodes explored with the model
@@ -92,7 +92,7 @@ BeelineBench also gives other measures on the same trials:
 | path score | the shortest path divided by the length of the path that the model found, over the trials that it solved. 1.0 means that the model's path is a shortest path. | `report` |
 | refusals | the share of the model's requests that it refused. Only OpenAI's Decisions API refuses. The chooser then asks once more with the options in a new order. If the API refuses that question too, the chooser takes the first option of the new order. | `report`, and [Model quirks](docs/model-quirks.md) |
 
-Each run stops at 2,500 explored nodes. A run that stops unsolved counts as 2,500 nodes, and its score gets \* (model) or † (heuristic). A footnote gives the number of these runs.
+Each run stops at 2,500 explored nodes. A run that stops unsolved counts as 2,500 nodes, and its score gets \* (model) or † (heuristic).
 
 The frontier holds a maximum of 255 states. If it holds more, the search drops states at random. [The frontier limit of 255 states](#the-frontier-limit-of-255-states) gives the details.
 
@@ -108,7 +108,7 @@ The frontier holds a maximum of 255 states. If it holds more, the search drops s
 
 ## Quick start
 
-Run the mini benchmark: the first 20 trials of each domain with pplx-decider 1.1 and pplx-decider 1.0. It needs one key, `PERPLEXITY_API_KEY`, in `.env`. [Price estimates](docs/costs.md) gives its price.
+Run the mini benchmark: the first 20 trials of each domain with pplx-decider 1.1 and pplx-decider 1.0. A `PERPLEXITY_API_KEY` is required in `.env`. [Price estimates](docs/costs.md) gives its price.
 
 ```bash
 git clone https://github.com/kyle-pena-nlp/beelinebench && cd beelinebench
@@ -121,30 +121,19 @@ uv run python -m beelinebench report
 > [!CAUTION]
 > `run` sends paid API requests. The model sends one request for each node that it explores.
 
-## Documentation
-
-| page | what it gives |
-|---|---|
-| [Usage](docs/usage.md) | the steps to run, the configuration, the commands, the models, and the files of a run |
-| [Integrate with your evaluation suite](docs/lab-integration.md) | the package, the container, and the JSON report |
-| [Benchmark versions](docs/benchmarks/README.md) | each official benchmark, with its figures and its data as tables |
-| [Price estimates](docs/costs.md) | the estimated price of a mini run and a full run of each hosted model |
-| [Model quirks](docs/model-quirks.md) | the behavior of the models and APIs that can change a score, and the rule for each |
-| [Run Clef on your own GPU](docs/clef-local.md) | how to serve Clef and Clef-flash locally, with no API key |
-| [Changelog](CHANGELOG.md) | the changes of each version of the code and of the benchmark |
 
 ## Limitations
 
 ### The frontier limit of 255 states
 
-A Jev question holds a maximum of 255 options. When the frontier holds more than 255 states, the search drops states at random until 255 states remain.  In order to avoid unfair comparisons, we apply this same limitation to the heuristic baseline and oracle. We plan on revisiting this decision in the next version of this benchmark.
+A Jev question holds a maximum of 255 options. When the frontier holds more than 255 states, the search drops states at random until 255 states remain. In order to avoid unfair comparisons, we apply this same limitation to the heuristic baseline and oracle. We plan to revisit this decision in the next version of this benchmark.
 
 ### Decision models are sensitive to the presentation
 
 A decision model can give a different answer when it gets the same options in a different form. Two examples of this behavior are known:
 
 - **The order of the options.** Jev prefers options near the start of a list. Thus, the chooser puts the options in a new random order for each question. The order comes from seeded draws for each trial and model.
-- **The text of the options.** [JevChat](https://github.com/kyle-pena-nlp/jevchat) uses Jev to write text one symbol at a time. Jev chooses much better when each option is the full text so far, not only the next symbol.  We suspect that this sensitivity to presentation is a common feature across problem domains.
+- **The text of the options.** [JevChat](https://github.com/kyle-pena-nlp/jevchat) uses Jev to write text one symbol at a time. Jev chooses much better when each option is the full text so far, not only the next symbol. We suspect that this sensitivity to presentation is a common feature across problem domains.
 
 The [sensitivity studies](#sensitivity-studies) measure these effects on one problem.
 
@@ -158,7 +147,7 @@ BeelineBench fixes its own random values: the trials, the option order, and the 
 
 ### The models and their APIs have quirks
 
-Some behavior of the models and their APIs affect their score. [Model quirks](docs/model-quirks.md) describes each known behavior and how this benchmark handles it.
+Some behaviors of the models and their APIs affect their scores. [Model quirks](docs/model-quirks.md) describes each known behavior and how this benchmark handles it.
 
 ### Sensitivity studies
 
@@ -179,7 +168,7 @@ These benchmarks also measure decision models. Each one asks single questions. B
 
 ## Contributing
 
-[How to contribute](CONTRIBUTING.md) tells you how to add a model, a problem, a protocol, or a benchmark version. AI-assisted code is okay, but a person must write the description of a pull request, and it must match the contents of the pull request in all material ways.
+We welcome proposals for new models and problems. Please consult the [contribution guide](CONTRIBUTING.md). AI-assisted code is okay, but a person must write the description of a pull request, and it must match the contents of the pull request in all material ways.
 
 ## Citation
 

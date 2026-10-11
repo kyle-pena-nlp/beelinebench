@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --extra llm
-      - name: every official benchmark has a page and a link
+      - name: every official benchmark has a page and a link, and the changelog has the code version
         run: uv run python -m beelinebench check-docs
       - name: README.md is what README.template.md and the results make
         run: uv run python -m beelinebench readme --check

@@ -13,7 +13,7 @@
     <line x1="220.6" y1="158" x2="205.1" y2="218"/>
     <line x1="220.6" y1="158" x2="236.0" y2="218"/>
   </g>
-  <polyline points="128.0,38 189.7,98 158.9,158 166.6,188.0" fill="none" stroke="#000" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="128.0,38 189.7,98 158.9,158 165.2,183" fill="none" stroke="#000" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
   <g fill="#fff" stroke="#000" stroke-width="4">
     <circle cx="66.3" cy="98" r="8"/>
     <circle cx="35.4" cy="158" r="8"/>
@@ -32,5 +32,22 @@
     <circle cx="189.7" cy="98" r="11"/>
     <circle cx="158.9" cy="158" r="11"/>
   </g>
-  <g stroke="#000" stroke-width="12" stroke-linecap="round"><line x1="162.3" y1="206" x2="186.3" y2="230"/><line x1="186.3" y1="206" x2="162.3" y2="230"/></g>
+  <!-- The bee at the end of the beeline, where the goal is. -->
+  <defs>
+    <clipPath id="bee-body"><ellipse cx="0" cy="0" rx="13" ry="9.5"/></clipPath>
+  </defs>
+  <g transform="translate(173 214) scale(1.15) rotate(-8)" stroke="#000" stroke-linejoin="round">
+    <ellipse cx="-4" cy="-13" rx="6" ry="9" transform="rotate(-25 -4 -13)" fill="#fff" stroke-width="3"/>
+    <ellipse cx="5" cy="-13" rx="6" ry="9" transform="rotate(20 5 -13)" fill="#fff" stroke-width="3"/>
+    <polygon points="-12,-2.5 -17,0 -12,2.5" fill="#000" stroke-width="1.5"/>
+    <ellipse cx="0" cy="0" rx="13" ry="9.5" fill="#f6c445" stroke="none"/>
+    <g clip-path="url(#bee-body)" fill="#000" stroke="none">
+      <rect x="-7" y="-12" width="4.5" height="24"/>
+      <rect x="1" y="-12" width="4.5" height="24"/>
+    </g>
+    <ellipse cx="0" cy="0" rx="13" ry="9.5" fill="none" stroke-width="3"/>
+    <circle cx="13" cy="-1" r="5.5" fill="#000" stroke="none"/>
+    <circle cx="15" cy="-2.5" r="1.6" fill="#fff" stroke="none"/>
+    <path d="M14 -6 Q15 -11 19 -12 M11.5 -6 Q10.5 -11 12.5 -14" fill="none" stroke-width="2" stroke-linecap="round"/>
+  </g>
 </svg>

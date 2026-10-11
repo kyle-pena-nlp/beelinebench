@@ -45,3 +45,19 @@ def test_the_results_part_of_a_page_is_replaced():
     assert "new" in once and "No results yet" not in once
     assert publishing.with_results(once, "## Results\n\nnewer").count("## Results") == 1
     assert "# Benchmark 1.0.0" in once
+
+
+def test_the_changelog_needs_a_section_for_the_code_version(tmp_path):
+    from beelinebench import VERSION
+
+    assert publishing.changelog_problems(PROJECT / "CHANGELOG.md", VERSION) == []
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("# Changelog\n\n## Unreleased\n\n## Code 1.0.10 (2026-10-12)\n")
+    assert publishing.changelog_problems(changelog, "1.0.1") == [
+        'CHANGELOG.md has no heading "## Code 1.0.1 (YYYY-MM-DD)" for version 1.0.1 of '
+        'pyproject.toml. To release it, rename "## Unreleased" to "## Code 1.0.1 (YYYY-MM-DD)".']
+    changelog.write_text("# Changelog\n\n## Code 1.0.1\n")
+    assert publishing.changelog_problems(changelog, "1.0.1")[0].endswith(
+        '"## Code 1.0.1" needs its release date.')
+    changelog.write_text("# Changelog\n\n## Code 1.0.1 (2026-10-11)\n")
+    assert publishing.changelog_problems(changelog, "1.0.1") == []

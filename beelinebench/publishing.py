@@ -4,7 +4,8 @@ Each official benchmark of ``benchmarks.toml`` has a page,
 ``docs/benchmarks/<name>.md``, and the index ``docs/benchmarks/README.md`` links
 to it. :func:`problems` lists what is missing. :func:`publish` writes the page of
 a benchmark from its definition, and writes the index again. It never writes over a
-page that exists.
+page that exists. :func:`changelog_problems` checks that ``CHANGELOG.md`` has a section
+for the version of the code.
 
 :func:`index` makes the index from ``benchmarks.toml``: a table of the versions, and
 the two figures of each version. ``python -m beelinebench readme`` writes it, and
@@ -13,6 +14,7 @@ the two figures of each version. ``python -m beelinebench readme`` writes it, an
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .benchmark import Benchmark
@@ -134,6 +136,24 @@ def problems(officials: dict[str, Benchmark], docs: Path) -> list[str]:
         if f"]({page_name(name)})" not in text:
             out.append(f"{index} has no link to {page_name(name)}")
     return out
+
+
+def changelog_problems(changelog: Path, version: str) -> list[str]:
+    """What ``changelog`` lacks: a heading ``## Code <version> (<date>)`` for the code
+    ``version``, where the date is the release date as YYYY-MM-DD.
+    """
+    heading = f"## Code {version}"
+    text = changelog.read_text()
+    if re.search(rf"^{re.escape(heading)} \(\d{{4}}-\d{{2}}-\d{{2}}\)\s*$", text, re.M):
+        return []
+    dated = f"{heading} (YYYY-MM-DD)"
+    problem = (f"{changelog.name} has no heading \"{dated}\" for version {version} of "
+               "pyproject.toml.")
+    if re.search(rf"^{re.escape(heading)}\s*$", text, re.M):
+        problem += f" \"{heading}\" needs its release date."
+    elif re.search(r"^## Unreleased\s*$", text, re.M):
+        problem += f" To release it, rename \"## Unreleased\" to \"{dated}\"."
+    return [problem]
 
 
 def page(b: Benchmark) -> str:

@@ -4,6 +4,11 @@ The code and the benchmarks have separate versions. The code runs every official
 benchmark of `benchmarks.toml`. A new benchmark version adds a table there, and no
 table is changed.
 
+Each released version has its release date, in UTC. Changes that are not released yet
+are under "Unreleased". A release renames that section to its version and date, and
+`python -m beelinebench check-docs` fails if `pyproject.toml` has a version without a
+section here.
+
 ## Unreleased
 
 * A master seed: `--seed N`, `seed` in `[run]`, or `seed` in a benchmark table. It goes
@@ -12,7 +17,7 @@ table is changed.
   `results/custom-<benchmark>.seed-<N>/`. Without a seed, every draw is as before, so
   benchmark 1.0.0 does not change.
 
-## Code 1.0.1
+## Code 1.0.1 (2026-10-11)
 
 * The README opens with a summary table of the newest benchmark: the score of each
   model on each domain, and the geometric mean over the domains.
@@ -24,7 +29,7 @@ table is changed.
 
 The benchmarks do not change.
 
-## Benchmark 1.0.0
+## Benchmark 1.0.0 (2026-10-11)
 
 * Greedy best-first search. The model ranks the whole frontier in one question
   at each step.
@@ -41,7 +46,7 @@ The benchmarks do not change.
   `wikispeedia/category_distance`, `rush_hour/blocking_cars`,
   `keys_doors/locked_doors`.
 
-## Code 1.0.0
+## Code 1.0.0 (2026-10-11)
 
 * Trial `n` of a domain is drawn from `Draws(domain, n)`, the same on every
   machine and for every model. The option order and the eviction of the model

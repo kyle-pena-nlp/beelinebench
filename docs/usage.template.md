@@ -4,7 +4,7 @@ This page is the reference for running BeelineBench: the steps, the configuratio
 
 ## Run from a clone
 
-These steps run BeelineBench from a clone of the repository. You can also install it as a package, and then run `beelinebench init` in an empty folder. To install it from PyPI: `pip install "beelinebench[plot]"`. [Integrate BeelineBench with your evaluation suite](lab-integration.md) gives the details, and also shows how to run it in a container.
+These steps run BeelineBench from a clone of the repository. You can also install it from PyPI with `pip install "beelinebench[plot]"`, and then run `beelinebench init` in an empty folder. [Integrate BeelineBench with your evaluation suite](lab-integration.md) gives the details, and also shows how to run it in a container.
 
 > [!CAUTION]
 > `run` sends paid API requests. The model sends one request for each node that it explores.
@@ -105,16 +105,6 @@ Command-line flags replace the values in the file for one run:
 uv run python -m beelinebench run --chooser haiku --domain tiles countdown --trials 3
 ```
 
-### Master seed
-
-Every random choice of a run comes from seeded draws: the trials, the order of the options, and the states that the frontier drops. A master seed puts one number at the root of all of them. With `--seed 7`, or `seed = 7` in the `[run]` table, each trial is a different problem of the same domain, with the same settings:
-
-```bash
-uv run python -m beelinebench run --chooser haiku --seed 7
-```
-
-A run with a master seed is not an official benchmark, so its results go to `results/custom-<benchmark>.seed-<N>/`, for example `results/custom-1.0.0.seed-7/`. Without a seed, the draws are those of the official benchmark. A few seeds show whether a result depends on the 100 trials that the official benchmark happens to draw. A benchmark in `benchmarks.toml` or `beelinebench.toml` can also have a `seed`.
-
 Other commands:
 
 | command | what it does |
@@ -130,7 +120,17 @@ Other commands:
 | `case-study` | Runs the sensitivity studies of the `[sensitivity]` table. Spends money. |
 | `agreement` | Sends the traced questions of one chooser to a second chooser, with the same options in the same order, and compares the choices. Records nothing. |
 | `plot` | Draws the figures of a benchmark to `docs/benchmarks/`: the scores, the score against the cost, the optimal choices, and the oracle regret. Needs `uv sync --extra plot`. |
-| `readme` | Writes this README, the benchmark pages, and the figures from the templates and the results. Runs only in a clone. |
+| `readme` | Writes `README.md`, the other generated pages, and the figures from the templates and the results. With `--check`, it writes nothing and fails if any of them is out of date, as CI does. Runs only in a clone. |
+
+### Master seed
+
+Every random choice of a run comes from seeded draws: the trials, the order of the options, and the states that the frontier drops. A master seed puts one number at the root of all of them. With `--seed 7`, or `seed = 7` in the `[run]` table, each trial is a different problem of the same domain, with the same settings:
+
+```bash
+uv run python -m beelinebench run --chooser haiku --seed 7
+```
+
+A run with a master seed is not an official benchmark, so its results go to `results/custom-<benchmark>.seed-<N>/`, for example `results/custom-1.0.0.seed-7/`. Without a seed, the draws are those of the official benchmark. A few seeds show whether a result depends on the 100 trials that the official benchmark happens to draw. A benchmark in `benchmarks.toml` or `beelinebench.toml` can also have a `seed`.
 
 ## Choosers
 

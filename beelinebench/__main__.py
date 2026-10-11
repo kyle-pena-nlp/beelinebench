@@ -11,7 +11,8 @@
     python -m beelinebench plot                   # docs/benchmarks/<version>.png, the scores as a figure
     python -m beelinebench download
     python -m beelinebench publish 1.0.0          # the page of a benchmark, and its link
-    python -m beelinebench check-docs             # CI: every official benchmark has both
+    python -m beelinebench check-docs             # CI: every official benchmark has both, and
+                                                  # CHANGELOG.md has the code version
     python -m beelinebench readme                 # README.md from README.template.md
     python -m beelinebench readme --check         # CI: README.md is up to date
 
@@ -665,14 +666,21 @@ def agreement(args: argparse.Namespace) -> None:
 
 
 def check_docs(args: argparse.Namespace) -> None:
+    from . import VERSION
+
     officials = benchmark.load(OFFICIAL)
-    found = publishing.problems(officials, DOCS)
-    for problem in found:
+    pages = publishing.problems(officials, DOCS)
+    changes = publishing.changelog_problems(PROJECT / "CHANGELOG.md", VERSION)
+    for problem in pages + changes:
         console.print(f"[red]{problem}")
-    if found:
-        raise SystemExit(f"{len(found)} problems. `python -m beelinebench publish <version>` "
-                         "writes a missing page and link.")
+    if pages or changes:
+        hints = ["`python -m beelinebench publish <version>` writes a missing page and link."
+                 ] if pages else []
+        hints += [f"Add a section for code {VERSION} to CHANGELOG.md."] if changes else []
+        count = len(pages + changes)
+        raise SystemExit(f"{count} problem{'s' if count > 1 else ''}. " + " ".join(hints))
     console.print(f"every official benchmark has a page and a link: {', '.join(officials)}")
+    console.print(f"CHANGELOG.md has a section for code {VERSION}")
 
 
 def publish(args: argparse.Namespace) -> None:
@@ -989,7 +997,8 @@ def main() -> None:
     command.add_argument("--out", type=Path, help="the image file. The default is "
                          "docs/benchmarks/<benchmark>.png")
     commands.add_parser("check-docs", help="every official benchmark has a page and a "
-                        "link. CI runs this.").set_defaults(handler=check_docs)
+                        "link, and CHANGELOG.md has a section for the code version. CI runs "
+                        "this.").set_defaults(handler=check_docs)
     command = commands.add_parser("readme", help="write README.md from README.template.md "
                                   "and the results")
     command.set_defaults(handler=make_readme)
