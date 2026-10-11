@@ -41,3 +41,23 @@ def test_every_official_benchmark_still_makes_its_trials():
             problem = make(1)
             assert problem.domain == domain
             assert problem.heuristic_name == settings["heuristic"]
+
+
+def test_a_master_seed_makes_a_custom_benchmark_with_other_trials():
+    import pytest
+
+    from beelinebench.domains import tiles
+
+    official = OFFICIALS["1.0.0"]
+    assert official.seed is None and benchmark.seeded(official, None) is official
+    seeded = benchmark.seeded(official, 7)
+    assert seeded.name == "1.0.0.seed-7" and seeded.seed == 7
+    assert benchmark.matching(seeded, list(seeded.domains), OFFICIALS) is None
+    settings = official.domains["tiles"]
+    plain, other = tiles.problem(1, **settings), tiles.problem(1, **settings, seed=7)
+    assert plain.start == tiles.problem(1, **settings, seed=None).start
+    assert plain.start != other.start and other.seed == 7
+    assert other.draws("evict").random() != plain.draws("evict").random()
+    with pytest.raises(ValueError):
+        benchmark.parse({"x": {"trials": 1, "max_expansions": 1, "max_frontier": 1,
+                               "domains": {}, "seed": "7"}})

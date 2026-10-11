@@ -105,6 +105,16 @@ Command-line flags replace the values in the file for one run:
 uv run python -m beelinebench run --chooser haiku --domain tiles countdown --trials 3
 ```
 
+### Master seed
+
+Every random choice of a run comes from seeded draws: the trials, the order of the options, and the states that the frontier drops. A master seed puts one number at the root of all of them. With `--seed 7`, or `seed = 7` in the `[run]` table, each trial is a different problem of the same domain, with the same settings:
+
+```bash
+uv run python -m beelinebench run --chooser haiku --seed 7
+```
+
+A run with a master seed is not an official benchmark, so its results go to `results/custom-<benchmark>.seed-<N>/`, for example `results/custom-1.0.0.seed-7/`. Without a seed, the draws are those of the official benchmark. A few seeds show whether a result depends on the 100 trials that the official benchmark happens to draw. A benchmark in `benchmarks.toml` or `beelinebench.toml` can also have a `seed`.
+
 Other commands:
 
 | command | what it does |

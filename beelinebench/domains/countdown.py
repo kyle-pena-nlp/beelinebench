@@ -57,7 +57,7 @@ def line(state: Numbers) -> str:
 
 
 def problem(trial: int, *, heuristic: str, numbers: int, largest_number: int,
-            smallest_target: int, largest_target: int) -> Problem:
+            smallest_target: int, largest_target: int, seed: int | None = None) -> Problem:
     """Trial ``trial``, drawn from ``Draws("countdown", trial)``.
 
     ``numbers`` numbers from 1 to ``largest_number``, and a target made from them
@@ -65,7 +65,7 @@ def problem(trial: int, *, heuristic: str, numbers: int, largest_number: int,
     to ``largest_target``, and is not one of the numbers.
     """
     check_heuristic("countdown", heuristic, ("nearest_number",))
-    rng = Draws("countdown", trial)
+    rng = Draws("countdown", trial, seed=seed)
     while True:
         start = tuple(sorted(1 + rng.below(largest_number) for _ in range(numbers)))
         state = start
@@ -75,7 +75,7 @@ def problem(trial: int, *, heuristic: str, numbers: int, largest_number: int,
         if smallest_target <= target <= largest_target and target not in start:
             break
     return Problem(
-        domain="countdown", trial=trial, start=start, moves=moves,
+        domain="countdown", trial=trial, seed=seed, start=start, moves=moves,
         solved=partial(reached, target), heuristic=partial(nearest, target), heuristic_name="nearest_number",
         render=line, objective=f"make {target} from the numbers, using every number",
         context=CONTEXT)

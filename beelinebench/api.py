@@ -72,13 +72,14 @@ def chooser(decide: Decide, problem: Problem, spend: Spend, order: Draws) -> Cho
 
 def evaluate(decide: Decide, *, name: str, benchmark: str | None = None,
              trials: int | None = None, domains: Sequence[str] | None = None,
-             project: Path | None = None) -> list[dict]:
+             project: Path | None = None, seed: int | None = None) -> list[dict]:
     """Run each domain of an official benchmark with ``decide``, and give the summaries.
 
     ``name`` names the model in the results: results/<benchmark>/<name>/. Use a new name
     for each version of the model. ``benchmark`` is an official version, the newest by
     default. ``trials`` runs trials 1 to N, for example 20 for a run the size of the mini
-    benchmark. A trial with a result is not run again, so a stopped run continues.
+    benchmark. A trial with a result is not run again, so a stopped run continues. ``seed``
+    is a master seed for every draw. Its results go to results/custom-<benchmark>.seed-<N>/.
     """
     from . import __main__ as cli
     from . import benchmark as benchmarks
@@ -86,13 +87,13 @@ def evaluate(decide: Decide, *, name: str, benchmark: str | None = None,
 
     root = project or cli.PROJECT
     officials = benchmarks.load(cli.OFFICIAL)
-    rules = officials[benchmark or list(officials)[-1]]
+    rules = benchmarks.seeded(officials[benchmark or list(officials)[-1]], seed)
     chosen = list(domains or rules.domains)
     label = cli.label_of(rules, chosen, officials)
     count = trials or rules.trials
     out = []
     for domain in chosen:
-        make = cli.maker(domain, rules.domains[domain])
+        make = cli.maker(domain, rules.domains[domain], rules.seed)
         path = results_file(root / "results", label, name, make(1))
         done = {r.trial for r in read(path)}
         for trial in range(1, count + 1):
@@ -100,7 +101,7 @@ def evaluate(decide: Decide, *, name: str, benchmark: str | None = None,
                 continue
             problem = make(trial)
             spend = Spend(max_requests=10 ** 9, max_input_tokens=10 ** 12)
-            choose = chooser(decide, problem, spend, Draws(domain, trial, "order", name))
+            choose = chooser(decide, problem, spend, problem.draws("order", name))
             record = measure(problem, rules=rules, label=label, choose=choose, chooser=name,
                              model=name, spend=spend,
                              trace=trace_file(root / "traces", label, name, problem))

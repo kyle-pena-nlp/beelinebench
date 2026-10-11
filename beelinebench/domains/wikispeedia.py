@@ -117,18 +117,19 @@ def fewest_clicks(graph: Graph, start: str, target: str) -> int | None:
     return None
 
 
-def problem(trial: int, graph: Graph, *, heuristic: str, min_clicks: int) -> Problem:
+def problem(trial: int, graph: Graph, *, heuristic: str, min_clicks: int,
+            seed: int | None = None) -> Problem:
     """Trial ``trial``, drawn from ``Draws("wikispeedia", trial)``.
 
     A random game that a person finished, of at least ``min_clicks`` clicks.
     """
     check_heuristic("wikispeedia", heuristic, ("category_distance",))
-    rng = Draws("wikispeedia", trial)
+    rng = Draws("wikispeedia", trial, seed=seed)
     start, target = rng.choice(graph.games)
     while (fewest_clicks(graph, start, target) or 0) < min_clicks:
         start, target = rng.choice(graph.games)
     return Problem(
-        domain="wikispeedia", trial=trial, start=start,
+        domain="wikispeedia", trial=trial, seed=seed, start=start,
         moves=partial(links_from, graph), solved=partial(reached, target),
         heuristic=partial(category_distance, graph, target),
         heuristic_name="category_distance", render=title,

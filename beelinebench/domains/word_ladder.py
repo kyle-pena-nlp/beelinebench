@@ -73,13 +73,14 @@ def steps_from(ladder: Ladder, start: str) -> dict[str, int]:
     return distance
 
 
-def problem(trial: int, ladder: Ladder, *, heuristic: str, min_steps: int) -> Problem:
+def problem(trial: int, ladder: Ladder, *, heuristic: str, min_steps: int,
+            seed: int | None = None) -> Problem:
     """Trial ``trial``, drawn from ``Draws("word_ladder", trial)``.
 
     A random start word, and a random target at least ``min_steps`` steps away.
     """
     check_heuristic("word_ladder", heuristic, ("letters_different",))
-    rng = Draws("word_ladder", trial)
+    rng = Draws("word_ladder", trial, seed=seed)
     words = sorted(ladder)
     while True:
         start = rng.choice(words)
@@ -88,7 +89,7 @@ def problem(trial: int, ladder: Ladder, *, heuristic: str, min_steps: int) -> Pr
             target = rng.choice(far)
             break
     return Problem(
-        domain="word_ladder", trial=trial, start=start, moves=partial(neighbours, ladder),
+        domain="word_ladder", trial=trial, seed=seed, start=start, moves=partial(neighbours, ladder),
         solved=partial(reached, target), heuristic=partial(letters_different, target),
         heuristic_name="letters_different",
         render=upper,

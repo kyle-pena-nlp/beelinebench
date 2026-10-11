@@ -42,6 +42,12 @@ class Problem:
     render: Callable[[Any], str]
     objective: str
     context: str
+    #: The master seed of the benchmark, or ``None``. See :mod:`beelinebench.rng`.
+    seed: int | None = None
+
+    def draws(self, *path: str | int) -> Draws:
+        """The draws of this trial at ``path``, for example ``("evict", "classic")``."""
+        return Draws(self.domain, self.trial, *path, seed=self.seed)
 
 
 def check_heuristic(domain: str, heuristic: str, known: tuple[str, ...]) -> None:

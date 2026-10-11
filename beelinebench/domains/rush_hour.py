@@ -128,20 +128,21 @@ def random_board(rng: Draws, count: int) -> tuple[tuple[Vehicle, ...], State]:
     return tuple(vehicles), tuple(state)
 
 
-def problem(trial: int, *, heuristic: str, vehicles: int, min_moves: int) -> Problem:
+def problem(trial: int, *, heuristic: str, vehicles: int, min_moves: int,
+            seed: int | None = None) -> Problem:
     """Trial ``trial``, drawn from ``Draws("rush_hour", trial)``.
 
     A random board with up to ``vehicles`` vehicles besides the red car. The board is
     kept if its shortest solution has at least ``min_moves`` moves.
     """
     check_heuristic("rush_hour", heuristic, ("blocking_cars",))
-    rng = Draws("rush_hour", trial)
+    rng = Draws("rush_hour", trial, seed=seed)
     while True:
         cars, start = random_board(rng, vehicles)
         distance = distances_to_goal(start=start, moves=partial(moves, cars), solved=reached)
         if distance.get(start, 0) >= min_moves:
             break
     return Problem(
-        domain="rush_hour", trial=trial, start=start, moves=partial(moves, cars),
+        domain="rush_hour", trial=trial, seed=seed, start=start, moves=partial(moves, cars),
         solved=reached, heuristic=partial(blocking_cars, cars), heuristic_name="blocking_cars",
         render=partial(board, cars), objective=OBJECTIVE, context=CONTEXT)

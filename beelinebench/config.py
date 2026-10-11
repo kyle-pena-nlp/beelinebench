@@ -67,6 +67,8 @@ class RunConfig:
     max_cost: float | None = None
     #: The most that all models together may cost. ``None`` for no limit.
     max_total_cost: float | None = None
+    #: A master seed for every draw, in place of the seed of the benchmark. ``None`` for none.
+    seed: int | None = None
 
 
 @dataclass(frozen=True)
@@ -117,7 +119,7 @@ def load(path: Path, officials: dict[str, Benchmark]) -> Config:
         run=RunConfig(benchmark=run["benchmark"], choosers=tuple(run.get("choosers", ())),
                       domains=tuple(run["domains"]) if "domains" in run else None,
                       trials=run.get("trials"), max_cost=run.get("max_cost"),
-                      max_total_cost=run.get("max_total_cost")),
+                      max_total_cost=run.get("max_total_cost"), seed=run.get("seed")),
         choosers=choosers, benchmarks=customs,
         mini=MiniConfig(trials=data["mini"]["trials"], choosers=tuple(data["mini"]["choosers"]))
         if "mini" in data else None,

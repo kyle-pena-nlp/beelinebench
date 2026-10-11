@@ -209,7 +209,7 @@ def replay(problem: Problem, rules: Benchmark, steps: list[dict], model: str,
     try:
         best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
                    choose=choose, max_expansions=len(steps), max_frontier=rules.max_frontier,
-                   evict=Draws(problem.domain, problem.trial, "evict", "model", model),
+                   evict=problem.draws("evict", "model", model),
                    step=step)
     except (Mismatch, StopIteration):
         return False
@@ -232,7 +232,7 @@ def baseline(problem: Problem, rules: Benchmark, observe: Observer | None = None
                       choose=lowest(problem.heuristic),
                       max_expansions=rules.max_expansions,
                       max_frontier=rules.max_frontier,
-                      evict=Draws(problem.domain, problem.trial, "evict", "classic"),
+                      evict=problem.draws("evict", "classic"),
                       observe=report, step=step)
 
 
@@ -247,9 +247,9 @@ def shortest(problem: Problem) -> dict:
 def wander(problem: Problem, rules: Benchmark, step=None):
     """The random arm: the search with a state of the frontier chosen at random."""
     return best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
-                      choose=random_choice(Draws(problem.domain, problem.trial, "random")),
+                      choose=random_choice(problem.draws("random")),
                       max_expansions=rules.max_expansions, max_frontier=rules.max_frontier,
-                      evict=Draws(problem.domain, problem.trial, "evict", "random"), step=step)
+                      evict=problem.draws("evict", "random"), step=step)
 
 
 def best(problem: Problem, rules: Benchmark, distance: dict):
@@ -257,7 +257,7 @@ def best(problem: Problem, rules: Benchmark, distance: dict):
     return best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
                       choose=oracle(distance), max_expansions=rules.max_expansions,
                       max_frontier=rules.max_frontier,
-                      evict=Draws(problem.domain, problem.trial, "evict", "oracle"))
+                      evict=problem.draws("evict", "oracle"))
 
 
 #: How many of the model's most probable states a trace step keeps.
@@ -356,7 +356,7 @@ def measure(problem: Problem, *, rules: Benchmark, label: str, choose: Chooser,
     outcome = best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
                          choose=choose, max_expansions=cap,
                          max_frontier=rules.max_frontier,
-                         evict=Draws(problem.domain, problem.trial, "evict", "model", model),
+                         evict=problem.draws("evict", "model", model),
                          observe=step, step=both(tracer, tallies["model"]))
     if tracer is not None:
         tracer.write(trace, {"benchmark": label, "chooser": chooser, "model": model,

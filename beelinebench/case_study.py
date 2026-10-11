@@ -107,9 +107,8 @@ def prepared(problem: Problem, representation: str, order: str, model: str,
         return text
 
     shown = replace(shown, render=remember)
-    seed = ("order", model) if order == "random" else ("order", model, order)
-    return shown, Arrange(order, Draws(problem.domain, problem.trial, *seed), problem.heuristic,
-                          labels)
+    path = ("order", model) if order == "random" else ("order", model, order)
+    return shown, Arrange(order, problem.draws(*path), problem.heuristic, labels)
 
 
 def results_dir(results: Path, chooser: str, study: CaseStudyConfig) -> Path:

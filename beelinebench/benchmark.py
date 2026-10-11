@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-RULES = ("max_expansions", "max_frontier")
+RULES = ("max_expansions", "max_frontier", "seed")
 
 
 @dataclass(frozen=True)
@@ -31,14 +31,36 @@ class Benchmark:
     max_frontier: int
     #: For each domain, its heuristic and the parameters of its trials.
     domains: dict[str, dict[str, Any]]
+    #: The master seed of every draw: the trials, the option orders and the dropped states.
+    #: ``None`` keeps the draws of a benchmark without one, such as 1.0.0.
+    seed: int | None = None
 
 
 def parse(tables: dict[str, Any]) -> dict[str, Benchmark]:
+    for name, t in tables.items():
+        check_seed(t.get("seed"), f"benchmark {name}")
     return {name: Benchmark(name=name, trials=t["trials"],
                             max_expansions=t["max_expansions"],
                             max_frontier=t["max_frontier"],
-                            domains={d: dict(p) for d, p in t["domains"].items()})
+                            domains={d: dict(p) for d, p in t["domains"].items()},
+                            seed=t.get("seed"))
             for name, t in tables.items()}
+
+
+def check_seed(seed: Any, where: str) -> None:
+    """A seed is an integer. A string such as ``"7"`` would give other draws than ``7``."""
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
+        raise ValueError(f"{where}: seed must be an integer, not {seed!r}")
+
+
+def seeded(b: Benchmark, seed: int | None) -> Benchmark:
+    """``b`` with the master seed ``seed``, named for it so that its results have their own
+    folder, for example ``1.0.0.seed-7``. ``None`` gives ``b``.
+    """
+    if seed is None or seed == b.seed:
+        return b
+    check_seed(seed, "--seed")
+    return replace(b, name=f"{b.name}.seed-{seed}", seed=seed)
 
 
 def load(path: Path) -> dict[str, Benchmark]:

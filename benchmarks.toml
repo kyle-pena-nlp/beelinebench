@@ -8,6 +8,8 @@
 # max_expansions            both arms stop after this many explorations, solved or not
 # max_frontier              the most states the frontier holds. States above it leave at random.
 # domains.<name>            the heuristic of the domain, and the parameters of its trials
+# seed                      optional. A master seed for every draw. Without it, the draws are
+#                           those of 1.0.0, which has no seed.
 
 [benchmark."1.0.0"]
 trials = 100

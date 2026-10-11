@@ -133,7 +133,8 @@ def random_layout(rng: Draws, count: int) -> Layout:
     return Layout(doors, parent, key_room, rng.choice(leaves))
 
 
-def problem(trial: int, *, heuristic: str, doors: int, min_moves: int) -> Problem:
+def problem(trial: int, *, heuristic: str, doors: int, min_moves: int,
+            seed: int | None = None) -> Problem:
     """Trial ``trial``, drawn from ``Draws("keys_doors", trial)``. The order of the
     statements is drawn from ``Draws("keys_doors", trial, "statements")``.
 
@@ -141,7 +142,7 @@ def problem(trial: int, *, heuristic: str, doors: int, min_moves: int) -> Proble
     least ``min_moves`` moves.
     """
     check_heuristic("keys_doors", heuristic, ("locked_doors",))
-    rng = Draws("keys_doors", trial)
+    rng = Draws("keys_doors", trial, seed=seed)
     while True:
         layout = random_layout(rng, doors)
         start: State = (START, frozenset({START}))
@@ -151,10 +152,10 @@ def problem(trial: int, *, heuristic: str, doors: int, min_moves: int) -> Proble
             break
     # The statements have their own draws, so a change to the layout draws does not
     # change their order.
-    order = Draws("keys_doors", trial, "statements")
+    order = Draws("keys_doors", trial, "statements", seed=seed)
     context = CONTEXT + " The building: " + " ".join(statements(layout, order))
     return Problem(
-        domain="keys_doors", trial=trial, start=start, moves=partial(moves, layout),
+        domain="keys_doors", trial=trial, seed=seed, start=start, moves=partial(moves, layout),
         solved=partial(reached, layout), heuristic=partial(locked_doors, layout),
         heuristic_name="locked_doors", render=partial(describe, layout),
         objective="reach the exit", context=context)

@@ -67,13 +67,13 @@ def scrambled(rng: Draws, moves: int) -> Board:
     return board
 
 
-def problem(trial: int, *, heuristic: str, scramble: int) -> Problem:
+def problem(trial: int, *, heuristic: str, scramble: int, seed: int | None = None) -> Problem:
     """Trial ``trial``, drawn from ``Draws("tiles", trial)``: ``scramble`` random moves from solved."""
     check_heuristic("tiles", heuristic, ("manhattan",))
-    rng = Draws("tiles", trial)
+    rng = Draws("tiles", trial, seed=seed)
     board = SOLVED
     while board == SOLVED:
         board = scrambled(rng, scramble)
     return Problem(
-        domain="tiles", trial=trial, start=board, moves=slide, solved=is_solved,
+        domain="tiles", trial=trial, seed=seed, start=board, moves=slide, solved=is_solved,
         heuristic=manhattan, heuristic_name="manhattan", render=line, objective=OBJECTIVE, context=CONTEXT)

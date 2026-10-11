@@ -18,3 +18,9 @@ def test_shuffle_and_sample_keep_the_items():
     assert sorted(items) == list(range(20))
     sample = Draws("x").sample(range(20), 5)
     assert len(set(sample)) == 5
+
+
+def test_a_master_seed_goes_first_in_the_path():
+    assert Draws("tiles", 1, seed=None).random() == Draws("tiles", 1).random()
+    assert Draws("tiles", 1, seed=7).random() == Draws(7, "tiles", 1).random()
+    assert Draws("tiles", 1, seed=7).random() != Draws("tiles", 1).random()

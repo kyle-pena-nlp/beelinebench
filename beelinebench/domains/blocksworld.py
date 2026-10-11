@@ -139,10 +139,10 @@ def tower_facts(stacks: list[list[str]]) -> set[str]:
                for below, above in zip(tower, tower[1:])})
 
 
-def problem(trial: int, *, heuristic: str, blocks: int) -> Problem:
+def problem(trial: int, *, heuristic: str, blocks: int, seed: int | None = None) -> Problem:
     """Trial ``trial``, drawn from ``Draws("blocksworld", trial)``. Random start and goal towers."""
     check_heuristic("blocksworld", heuristic, ("h_ff",))
-    rng = Draws("blocksworld", trial)
+    rng = Draws("blocksworld", trial, seed=seed)
     start = towers(rng, blocks)
     goal = frozenset(tower_facts(towers(rng, blocks)))
     while goal <= tower_facts(start):
@@ -150,7 +150,7 @@ def problem(trial: int, *, heuristic: str, blocks: int) -> Problem:
     state = frozenset(tower_facts(start) | {f"(clear {tower[-1]})" for tower in start}
                       | {"(handempty)"})
     return Problem(
-        domain="blocksworld", trial=trial, start=state, moves=partial(moves, blocks),
+        domain="blocksworld", trial=trial, seed=seed, start=state, moves=partial(moves, blocks),
         solved=partial(reached, goal), heuristic=partial(h_ff, blocks, goal), heuristic_name="h_ff",
         render=facts, objective=("reach a state where all of these facts are true: "
                                  + " ".join(sorted(goal))),

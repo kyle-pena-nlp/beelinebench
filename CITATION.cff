@@ -9,6 +9,8 @@ authors:
 version: 1.0.1
 date-released: 2026-10-11
 license: Apache-2.0
+# The concept DOI: it resolves to the newest version on Zenodo.
+doi: 10.5281/zenodo.23291446
 repository-code: "https://github.com/kyle-pena-nlp/beelinebench"
 url: "https://github.com/kyle-pena-nlp/beelinebench"
 keywords:

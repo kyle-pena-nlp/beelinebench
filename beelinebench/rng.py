@@ -5,6 +5,11 @@ a list of strings and integers. The seed is the SHA-256 of the path as JSON, so
 ``"1"`` and ``1`` give different seeds, and the hash seed of the process does
 not change anything.
 
+A benchmark can have a master seed. ``Draws("tiles", 1, seed=7)`` puts the seed at
+the start of the path, so every draw of the benchmark comes from it. Without a
+seed, the path is unchanged: benchmark 1.0.0 has no seed, and its draws stay as
+they were.
+
 Python keeps the sequence of ``random.Random.random()`` the same across
 versions for the same integer seed. It does not keep ``choice``, ``shuffle`` or
 ``sample`` the same. So this class makes every draw from ``random()``.
@@ -20,7 +25,9 @@ from typing import Any
 
 
 class Draws:
-    def __init__(self, *path: str | int) -> None:
+    def __init__(self, *path: str | int, seed: int | None = None) -> None:
+        if seed is not None:
+            path = (seed, *path)
         digest = hashlib.sha256(json.dumps(list(path)).encode()).digest()
         self.source = random.Random(int.from_bytes(digest, "big"))
 

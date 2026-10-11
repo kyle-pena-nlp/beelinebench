@@ -4,6 +4,14 @@ The code and the benchmarks have separate versions. The code runs every official
 benchmark of `benchmarks.toml`. A new benchmark version adds a table there, and no
 table is changed.
 
+## Unreleased
+
+* A master seed: `--seed N`, `seed` in `[run]`, or `seed` in a benchmark table. It goes
+  at the start of the path of every draw, so one number sets the trials, the option
+  orders and the dropped states. A seeded run writes to
+  `results/custom-<benchmark>.seed-<N>/`. Without a seed, every draw is as before, so
+  benchmark 1.0.0 does not change.
+
 ## Code 1.0.1
 
 * The README opens with a summary table of the newest benchmark: the score of each

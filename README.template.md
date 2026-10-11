@@ -10,32 +10,32 @@
 
 [![Benchmark {{ latest_benchmark }}](https://img.shields.io/badge/benchmark-{{ latest_benchmark }}-1f2328)](docs/benchmarks/{{ latest_benchmark }}.md)
 [![CI](https://github.com/kyle-pena-nlp/beelinebench/actions/workflows/ci.yml/badge.svg)](https://github.com/kyle-pena-nlp/beelinebench/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/beelinebench?color=3776ab)](https://pypi.org/project/beelinebench/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab)](pyproject.toml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23291446.svg)](https://doi.org/10.5281/zenodo.23291446)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue)](LICENSE)
 
 </div>
 
-BeelineBench measures how well a decision model plans ahead when it solves a multi-step problem. A model that explores fewer unnecessary intermediate states "beelines" directly to the solution, and gets a higher score.  Navigating directly to the solution through fewer steps could be interpreted as evidence that the model did some form of internal planning ahead.
+BeelineBench measures how well a decision model plans while it solves a multi-step problem, like blockworld or the sliding tile puzzle. A decision model that chooses to explore fewer unnecessary intermediate states gets a higher score.  A perfect score means that the decision model 'beelined' directly to the solution along a shortest path.
 
 - **{{ domain_count }} domains**: sliding puzzles, planning, arithmetic, word games, and link navigation on Wikipedia.
-- **Baselines**: the classic heuristic of each domain, random choice, and an oracle that knows the true distance to the goal.
-- **Seeded and portable**: each trial, option order, and dropped state comes from seeded draws, so a trial is the same on each machine.
-- **95% intervals on all scores**: from a bootstrap over the {{ trials }} trials of each domain.
+- **Baselines**: the classic heuristic of each domain, random choice, and an oracle that knows a shortest path to the goal.
+- **Seeded and portable**: each trial, option order, and dropped state comes from seeded draws, so a trial is the same on each machine. A [master seed](docs/usage.md#master-seed) (`--seed N`) draws a new set of trials under the same rules, to check that a result does not depend on the official trials.
 - **Open harness**: configuration-driven, with a container image. Any model that uses the Jev protocol or OpenAI's Decisions API can run. [Integrate BeelineBench with your evaluation suite](docs/lab-integration.md).
 
 > [!NOTE]
-> Classic state-space search (for example, `A*`) will almost certainly remain the most efficient technique for most of these domains. BeelineBench evaluates the multi-step reasoning of decision models. It does not suggest that decision models should replace classic techniques on these domains.
+> Classic state-space search (for example, `A*`) will almost certainly remain the most efficient technique for most classic problems. BeelineBench is intended to evaluate the multi-step planning ability of decision models. It does not suggest that decision models should replace classic techniques for these domains.
 
 ## Results
-
-Benchmark {{ latest_benchmark_link }}.
-The overall score is the geometric mean of the domain scores.
 
 {{ leaderboard }}
 
 {{ commentary_link }}.
 
-\* or †: at least one model (\*) or heuristic (†) run did not solve within {{ max_expansions }} nodes, so the true score is lower.
+\* or †: at least one model (\*) or heuristic (†) run did not solve within {{ max_expansions }} nodes, so the true score is lower.  The overall score is the geometric mean of the domain scores.
+
+## Diagnostic Plots
 
 <details>
 <summary><b>Scores by domain, with 95% intervals</b></summary>
@@ -60,25 +60,15 @@ The overall score is the geometric mean of the domain scores.
 
 [All benchmark versions and their figures](docs/benchmarks/README.md)
 
-### Sensitivity studies
-
-Three studies measure how much the score of {{ study_models }} changes on one problem:
-
-{{ study_links }}
-
 ## Method
 
-BeelineBench uses the model as the ranker of the frontier in a best-first search. At each step, the search sends all open states to the model in one request. The search stops when it finds the goal.
+The decision model is used to rank the frontier of open states in a best-first search. At each step, the search sends all open states to the model in one request. The search stops when it finds the goal.
 
-A beeline score of 1.0 is perfect: the model navigated to the solution in a minimum number of steps. A score of 0.1 means that the model explored ten times as many nodes as necessary. The score of a domain is the geometric mean over its {{ trials }} random trials, with a 95% interval.
-
-The score is the number of nodes in the shortest path to the solution divided by the number of nodes that the model explores:
+Before the search, a breadth-first search finds a shortest path to the goal to find a shortest path. The score is the number of nodes in the shortest path to the solution divided by the number of nodes that the model explores.
 
 ```
 score = (shortest path + 1) / nodes explored with the model
 ```
-
-Before the search, a breadth-first search finds a shortest path to the goal.
 
 BeelineBench also gives other measures on the same trials:
 
@@ -95,32 +85,15 @@ Each run stops at {{ max_expansions }} explored nodes. A run that stops unsolved
 
 The frontier holds a maximum of 255 states. If it holds more, the search drops states at random. [The frontier limit of 255 states](#the-frontier-limit-of-255-states) gives the details.
 
-
 ## Domains
 
-- **8-puzzle** ([Wikipedia](https://en.wikipedia.org/wiki/15_puzzle)): the player slides eight numbered tiles on a 3 × 3 board, through one gap, until the tiles are in order.
-- **Blocksworld** ([Wikipedia](https://en.wikipedia.org/wiki/Blocks_world)): a robot hand moves blocks, one at a time, until the blocks make the goal towers.
-- **Countdown** ([Wikipedia](https://en.wikipedia.org/wiki/Countdown_(game_show))): the player combines four numbers with addition, subtraction, multiplication, and division to make a target number.
-- **Word ladder** ([Wikipedia](https://en.wikipedia.org/wiki/Word_ladder)): the player changes one letter at a time to get from a start word to a target word, and each step must be a word.
+- **8-puzzle** ([Wikipedia](https://en.wikipedia.org/wiki/15_puzzle)): the player slides eight numbered tiles on a 3 × 3 board until the tiles are in order.
+- **Blocksworld** ([Wikipedia](https://en.wikipedia.org/wiki/Blocks_world)): a robot hand moves blocks, one at a time, until the blocks are arranged according to the goal state.
+- **Countdown** ([Wikipedia](https://en.wikipedia.org/wiki/Countdown_(game_show))): the player combines four numbers with addition, subtraction, multiplication, and division in order to make a target number.
+- **Word ladder** ([Wikipedia](https://en.wikipedia.org/wiki/Word_ladder)): the player changes one letter at a time to get from a start word to a target word, but each intermediate step must be a real word.
 - **Wikispeedia** ([SNAP](https://snap.stanford.edu/data/wikispeedia.html)): the player clicks links from one Wikipedia article to the next, until the player gets to the target article.
-- **Rush Hour** ([Wikipedia](https://en.wikipedia.org/wiki/Rush_Hour_(puzzle))): the player slides cars and trucks on a 6 × 6 board until the red car can leave through the exit. A vehicle moves only along its own direction, and other vehicles block the path of the red car. So the player must often move a vehicle out of the way first, and sometimes move a third vehicle to make space for it. The model gets the board as six rows of letters and dots, divided by `|`. BeelineBench makes these boards at random, and each one has a solution.
-- **Keys and doors**: the player walks through the rooms of a building to the exit. Each door has a color, and the key of the same color opens it. The keys are in the rooms, and a key can be behind a different door. So the player must sometimes go into a side room for a key, and then go back. The model gets the building as a list of statements in a random order, for example "The red key is behind the blue door." BeelineBench makes these buildings at random, and each one has a solution.
-
-### Settings of benchmark {{ latest_benchmark }}
-
-| domain | heuristic | state | trial |
-|---|---|---|---|
-| `tiles` | `manhattan` | an 8-puzzle board | 12 random moves from the solved board |
-| `blocksworld` | `h_ff` | the true facts for 7 blocks and a hand | random start towers and random goal towers |
-| `countdown` | `nearest_number` | the numbers that are left | 4 numbers from 1 to 25, and a target from 10 to 100 |
-| `word_ladder` | `letters_different` | a five-letter word | a random word, and a target at least 5 steps away |
-| `wikispeedia` | `category_distance` | a Wikipedia article title | an article pair from a completed human game, at least 3 clicks apart |
-| `rush_hour` | `blocking_cars` | a 6 × 6 board of vehicles | a random board with the red car and a maximum of 10 other vehicles, at least 6 moves from the solution |
-| `keys_doors` | `locked_doors` | the current room, the keys and the open doors | a random building with 10 doors, at least 12 moves from the exit |
-
-Some domains are harder than others, so compare scores from two different domains with care.
-
-`benchmarks.toml` holds the exact settings of each version.
+- **Rush Hour** ([Wikipedia](https://en.wikipedia.org/wiki/Rush_Hour_(puzzle))): the player slides cars and trucks on a 6 × 6 board until the red car can leave through the exit. The model gets the board as six rows of letters and dots, divided by `|`.
+- **Keys and doors**: the player walks through the rooms of a building to the exit. Each door has a color, and the key of the same color opens it. The keys are in the rooms, and a key can be behind a different door. The model gets the building as a list of statements in a random order, for example "The red key is behind the blue door."
 
 ## Quick start
 
@@ -151,26 +124,18 @@ uv run python -m beelinebench report
 
 ## Limitations
 
-BeelineBench has four known limitations. Each one can change a score.
-
 ### The frontier limit of 255 states
 
-A Jev question holds a maximum of 255 options. The search sends the full frontier as one question, so the frontier holds a maximum of 255 states. When the frontier holds more than 255 states, the search drops states at random until 255 states remain.
-
-The heuristic arm, the oracle arm, and the model arm use the same rule, each with its own seeded draws. The search forgets a dropped state, so it can find that state again later.
-
-A long search fills the frontier. A Wikipedia article with many links also fills it quickly. For example, "United States" has 294 links. When the limit drops a state of the shortest path, a perfect chooser explores more states. The oracle score shows this effect. In benchmark 1.0.0, the oracle score is 1.000 for each domain except `wikispeedia`, where it is 0.987.
-
-OpenAI's Decisions API accepted a question with 255 options in a test on 2026-10-09. Its documentation gives no limit. BeelineBench uses the limit of 255 for all models, so that all models get the same questions.
+A Jev question holds a maximum of 255 options. When the frontier holds more than 255 states, the search drops states at random until 255 states remain.  In order to avoid unfair comparisons, we apply this same limitation to the heuristic baseline and oracle. We plan on revisiting this decision in the next version of this benchmark.
 
 ### Decision models are sensitive to the presentation
 
-A decision model can give a different answer when it gets the same options in a different form. Two examples are known:
+A decision model can give a different answer when it gets the same options in a different form. Two examples of this behavior are known:
 
 - **The order of the options.** Jev prefers options near the start of a list. Thus, the chooser puts the options in a new random order for each question. The order comes from seeded draws for each trial and model.
-- **The text of the options.** [JevChat](https://github.com/kyle-pena-nlp/jevchat) uses Jev to write text one symbol at a time. Its author found that Jev chooses much better when each option is the full text so far, not the next symbol alone.
+- **The text of the options.** [JevChat](https://github.com/kyle-pena-nlp/jevchat) uses Jev to write text one symbol at a time. Jev chooses much better when each option is the full text so far, not only the next symbol.  We suspect that this sensitivity to presentation is a common feature across problem domains.
 
-BeelineBench writes the states of a domain in one fixed form. A different form, for example a board as a grid and not as one line, can give a different score. Thus, a score measures a model together with the form of the states, not the model alone. The [sensitivity studies](#sensitivity-studies) measure these effects on one problem.
+The [sensitivity studies](#sensitivity-studies) measure these effects on one problem.
 
 ### Some APIs have no seed
 
@@ -182,7 +147,13 @@ BeelineBench fixes its own random values: the trials, the option order, and the 
 
 ### The models and their APIs have quirks
 
-Some behavior of the models and their APIs can change a score. [Model quirks](docs/model-quirks.md) describes each behavior, and the rule that BeelineBench uses for it: the served model, refusals, dated model names, a short context, models that BeelineBench cannot use, and errors from the APIs.
+Some behavior of the models and their APIs affect their score. [Model quirks](docs/model-quirks.md) describes each known behavior and how this benchmark handles it.
+
+### Sensitivity studies
+
+How sensitive is the benchmark to factors like how the problem domain is presented?
+
+{{ study_links }}
 
 ## Related benchmarks
 
@@ -208,6 +179,7 @@ If you use BeelineBench, cite it as follows. Give the benchmark version that you
   year    = {2026},
   version = {{{ code_version }}},
   note    = {Benchmark {{ latest_benchmark }}},
+  doi     = {10.5281/zenodo.23291446},
   url     = {https://github.com/kyle-pena-nlp/beelinebench}
 }
 ```
@@ -223,4 +195,4 @@ BeelineBench is licensed under the [Apache License, Version 2.0](LICENSE). [NOTI
 
 ## Support BeelineBench
 
-Each run of a hosted model costs money. The full runs of the six models in {{ latest_benchmark }} cost about $120 in API fees. The pilots and the sensitivity studies cost about $30 more. The local Clef runs need a rented GPU. To pay for more models and new versions of the benchmark, [sponsor BeelineBench on GitHub](https://github.com/sponsors/kyle-pena-nlp).
+Each run of a hosted model costs money. The full runs of the six models in {{ latest_benchmark }} cost about $120 in API fees. The pilots and the sensitivity studies cost about $30 more. Some models were not included due to their expense. To pay for more models and new versions of the benchmark, [sponsor BeelineBench on GitHub](https://github.com/sponsors/kyle-pena-nlp).

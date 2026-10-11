@@ -65,20 +65,21 @@ DOCS = PROJECT / "docs" / "benchmarks"
 console = Console()
 
 
-def maker(domain: str, settings: dict[str, Any]) -> Callable[[int], Problem]:
-    """The function that makes trial ``n`` of ``domain`` with ``settings``."""
+def maker(domain: str, settings: dict[str, Any],
+          seed: int | None = None) -> Callable[[int], Problem]:
+    """The function that makes trial ``n`` of ``domain`` with ``settings`` and master ``seed``."""
     ensure_data(domain)
     if domain == "wikispeedia":
         graph = wikispeedia.load(PROJECT / wikispeedia.DATA)
-        return lambda trial: wikispeedia.problem(trial, graph, **settings)
+        return lambda trial: wikispeedia.problem(trial, graph, **settings, seed=seed)
     if domain == "word_ladder":
         ladder = word_ladder.load(PROJECT / word_ladder.DATA)
-        return lambda trial: word_ladder.problem(trial, ladder, **settings)
+        return lambda trial: word_ladder.problem(trial, ladder, **settings, seed=seed)
     problem = {"tiles": tiles.problem, "blocksworld": blocksworld.problem,
                "countdown": countdown.problem, "rush_hour": rush_hour.problem,
                "keys_doors": keys_doors.problem}[domain]
     # A trial can take seconds to make (Rush Hour rejects easy boards), so keep each one.
-    return functools.cache(lambda trial: problem(trial, **settings))
+    return functools.cache(lambda trial: problem(trial, **settings, seed=seed))
 
 
 def progress() -> Progress:
@@ -108,7 +109,11 @@ def setup(args: argparse.Namespace):
     name = args.benchmark or cfg.run.benchmark
     if name not in every:
         raise SystemExit(f"no benchmark {name!r}. There are: {', '.join(every)}")
-    chosen = every[name]
+    seed = args.seed if args.seed is not None else cfg.run.seed
+    try:
+        chosen = benchmark.seeded(every[name], seed)
+    except ValueError as error:
+        raise SystemExit(str(error))
     domains = args.domain or list(cfg.run.domains or chosen.domains)
     unknown = [d for d in domains if d not in chosen.domains]
     if unknown:
@@ -130,7 +135,7 @@ def show_baseline(args: argparse.Namespace) -> None:
                   caption="A score is (shortest path + 1) / explorations. 1.0 is perfect.")
     with progress() as bars:
         for domain in domains:
-            make = maker(domain, chosen.domains[domain])
+            make = maker(domain, chosen.domains[domain], chosen.seed)
             heuristic = chosen.domains[domain]["heuristic"]
             bench = bars.add_task(f"classic · {domain}/{heuristic}", total=trials, status="")
             current = bars.add_task("", total=None, status="")
@@ -207,7 +212,7 @@ def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
                           f"The limit is ${max_total:.2f}.")
     with progress() as bars:
         for domain in domains:
-            make = maker(domain, chosen.domains[domain])
+            make = maker(domain, chosen.domains[domain], chosen.seed)
             path = results_file(RESULTS, label, chooser.name, make(1))
             old = {record.trial: record for record in read(path)}
             recorded = set(old)
@@ -226,8 +231,7 @@ def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
                 if trial in done:
                     continue
                 problem = make(trial)
-                choose = make_chooser(problem, spend,
-                                      Draws(domain, trial, "order", chooser.model))
+                choose = make_chooser(problem, spend, problem.draws("order", chooser.model))
                 try:
                     trace = trace_file(TRACES, label, chooser.name, problem)
                     # A re-run writes a candidate trace, which takes the old one's place only
@@ -511,7 +515,7 @@ def fill(args: argparse.Namespace) -> None:
         if not missing:
             continue
         rules = every[label]
-        make = makers.setdefault((label, domain), maker(domain, rules.domains[domain]))
+        make = makers.setdefault((label, domain), maker(domain, rules.domains[domain], rules.seed))
         filled = []
         for r in records:
             if r.random_score is None:
@@ -559,7 +563,7 @@ def run_case_study(args: argparse.Namespace) -> None:
                         "represent", None)
     if represent is None:
         raise SystemExit(f"{study.domain} has no other representations")
-    make = maker(study.domain, rules.domains[study.domain])
+    make = maker(study.domain, rules.domains[study.domain], rules.seed)
     for name in study.choosers:
         chooser = cfg.choosers[name]
         ledger = dataclasses.replace(chooser, name=f"{chooser.name}.{case_study.LABEL}")
@@ -615,7 +619,7 @@ def agreement(args: argparse.Namespace) -> None:
                   "questions a second",
                   title=f"{test.title} against the traces of {against.title}")
     for domain in args.domain or list(rules.domains):
-        make = maker(domain, rules.domains[domain])
+        make = maker(domain, rules.domains[domain], rules.seed)
         stem = f"{domain}.{rules.domains[domain]['heuristic']}"
         trials = same = questions = 0
         differences: list[float] = []
@@ -629,7 +633,7 @@ def agreement(args: argparse.Namespace) -> None:
             problem = make(trial)
             spend = Spend(max_requests=10 ** 9, max_input_tokens=10 ** 12)
             # The order draws of the traced run, so each question is the same request.
-            ask = make_chooser(problem, spend, Draws(domain, trial, "order", against.model))
+            ask = make_chooser(problem, spend, problem.draws("order", against.model))
             traced = iter(steps)
 
             def choose(states):
@@ -651,7 +655,7 @@ def agreement(args: argparse.Namespace) -> None:
             best_first(start=problem.start, moves=problem.moves, solved=problem.solved,
                        choose=choose, max_expansions=len(steps),
                        max_frontier=rules.max_frontier,
-                       evict=Draws(domain, trial, "evict", "model", against.model), step=forced)
+                       evict=problem.draws("evict", "model", against.model), step=forced)
             trials += 1
         if questions:
             table.add_row(domain, str(trials), f"{questions:,}", f"{same / questions:.1%}",
@@ -926,6 +930,9 @@ def main() -> None:
         command.add_argument("--domain", nargs="+", help="in place of [run] domains")
         command.add_argument("--trials", type=int, help="runs trials 1 to N, in place "
                              "of the trials of the config and the benchmark")
+        command.add_argument("--seed", type=int, help="a master seed for every draw, in place "
+                             "of [run] seed. The results go to "
+                             "results/custom-<benchmark>.seed-<N>/")
         if name == "run":
             command.add_argument("--chooser", help="one chooser, in place of [run] choosers")
             command.add_argument("--max-requests", type=int,
