@@ -16,6 +16,8 @@ section here.
   orders and the dropped states. A seeded run writes to
   `results/custom-<benchmark>.seed-<N>/`. Without a seed, every draw is as before, so
   benchmark 1.0.0 does not change.
+* `run` exits with status 1 when a chooser stopped at a limit, as `case-study` does, so
+  a script can tell that the run is partial.
 
 ## Code 1.0.1 (2026-10-11)
 

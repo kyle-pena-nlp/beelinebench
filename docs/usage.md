@@ -85,7 +85,7 @@ max_requests = 200000
 max_input_tokens = 714000000
 ```
 
-Each run stops before a request that starts above a limit. `.spend/<chooser>.json` holds the cost of each model over all runs.
+Each run stops before a request that starts above a limit. The trial in progress is not recorded, the other choosers still run, and `run` then exits with status 1, so a script can tell that the run is partial. Run the same command again to continue. `.spend/<chooser>.json` holds the cost of each model over all runs.
 
 A chooser table can also have these settings:
 

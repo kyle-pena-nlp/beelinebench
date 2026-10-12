@@ -171,6 +171,7 @@ def run(args: argparse.Namespace) -> None:
             raise SystemExit(f"no chooser {name!r} in {args.config}. "
                              f"It has: {', '.join(cfg.choosers)}")
     label = label_of(chosen, domains, officials)
+    stopped = []
     for name in names:
         chooser = cfg.choosers[name]
         trials = args.trials or (mini.trials if mini else chooser.trials or cfg.run.trials
@@ -182,6 +183,12 @@ def run(args: argparse.Namespace) -> None:
                                max_total=cfg.run.max_total_cost,
                                retrace=args.retrace, rerun_unclean=args.rerun_unclean)
         show_match(chooser.name, chosen, label, domains, officials, finished)
+        if not finished:
+            stopped.append(chooser.name)
+    # A run that stopped early exits non-zero, so that a script sees that it is partial.
+    if stopped:
+        raise SystemExit(f"{', '.join(stopped)} stopped at a limit before the run was done. "
+                         f"Run the command again to continue.")
 
 
 def run_chooser(chooser: config.ChooserConfig, chosen: Benchmark, label: str,
